@@ -158,6 +158,16 @@ function detectNamePattern(files: CorpusFile[]): Map<string, { participant: stri
   if (!best) return result;
   const chosen = supported[best.position];
   for (const [k, v] of chosen) result.set(k, v);
+  // Once the participant labels are known, apply the pattern to every tier that starts
+  // (or ends) with one of them, even if no sibling tier of another participant exists.
+  const labels = new Set([...chosen.values()].map((v) => v.participant));
+  for (const f of files) {
+    for (const t of f.doc.tiers) {
+      if (result.has(t.id)) continue;
+      const sp = splitEdge(t.id, best.position);
+      if (sp && labels.has(sp.token)) result.set(t.id, { participant: sp.token, layer: sp.rest });
+    }
+  }
   return result;
 }
 
