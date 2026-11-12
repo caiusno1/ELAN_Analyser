@@ -47,6 +47,8 @@ export interface Tier {
   cvRef?: string;
   /** Sorted by start, then end. */
   annotations: Annotation[];
+  /** True for tiers computed by the analyser rather than read from the file. */
+  derived?: boolean;
 }
 
 export interface LinguisticType {

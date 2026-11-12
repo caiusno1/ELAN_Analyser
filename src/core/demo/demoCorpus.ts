@@ -215,7 +215,7 @@ class DyadSim {
     const c = this.cond;
     const figure = FIGURES[fig]!;
     // Descriptions get shorter and gestures rarer over rounds (Clark & Wilkes-Gibbs 1986).
-    const decay = [1, 0.7, 0.45, 0.3][round - 1]!;
+    const decay = [1, 0.6, 0.3, 0.15][round - 1]!;
     const pG = Math.min(0.95, c.pGesture * decay * this.gestureBoost);
 
     // --- director describes --------------------------------------------------------
@@ -308,11 +308,18 @@ class DyadSim {
     const end = this.lastEnd + 1500;
     const changes: { t: number; v: string }[] = [{ t: 0, v: "task" }];
     for (const u of this.utts) {
+      const dur = u.end - u.start;
       if (u.speaker === p) {
-        // Speakers look away while planning and return to the partner near the turn end.
-        changes.push({ t: u.start - rng.range(0, 150), v: rng.categorical([0.62, visible ? 0.23 : 0, 0.15]) === 0 ? "task" : rng.bernoulli(visible ? 0.6 : 0) ? "partner" : "away" });
-        const dur = u.end - u.start;
-        if (visible && dur > 900 && rng.bernoulli(0.72)) changes.push({ t: u.end - rng.range(350, Math.min(900, dur * 0.6)), v: "partner" });
+        if (dur <= 900) {
+          // Short contributions (feedback, confirmations) are mostly said while looking at the partner.
+          const v = visible ? (rng.bernoulli(0.7) ? "partner" : "task") : rng.bernoulli(0.8) ? "task" : "away";
+          changes.push({ t: u.start - rng.range(0, 150), v });
+        } else {
+          // Speakers look away while planning a longer turn and return to the partner
+          // shortly before it ends (Kendon 1967).
+          changes.push({ t: u.start - rng.range(0, 150), v: rng.bernoulli(0.75) ? "task" : "away" });
+          if (visible && rng.bernoulli(0.8)) changes.push({ t: u.end - rng.range(300, Math.min(800, dur * 0.5)), v: "partner" });
+        }
       } else {
         // Listeners mostly look at the speaker (when they can see them).
         const v = visible ? (rng.bernoulli(0.74) ? "partner" : "task") : rng.bernoulli(0.8) ? "task" : "away";
