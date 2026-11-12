@@ -173,6 +173,41 @@ export class Rng {
     return this.uniform() < p;
   }
 
+  /** Binomial(n, p): inversion for small expected counts, normal approximation otherwise. */
+  binomial(n: number, p: number): number {
+    if (n <= 0 || p <= 0) return 0;
+    if (p >= 1) return n;
+    if (p > 0.5) return n - this.binomial(n, 1 - p);
+    if (n * p < 30) {
+      // BINV: sequential search from zero.
+      const q = 1 - p;
+      const s = p / q;
+      let f = Math.pow(q, n);
+      if (f > 0) {
+        let u = this.uniform();
+        let k = 0;
+        while (u > f && k < n) {
+          u -= f;
+          k++;
+          f *= ((n - k + 1) / k) * s;
+        }
+        return k;
+      }
+    }
+    const k = Math.round(n * p + Math.sqrt(n * p * (1 - p)) * this.normal());
+    return Math.min(n, Math.max(0, k));
+  }
+
+  /** Student t with `df` degrees of freedom. */
+  studentT(df: number): number {
+    return this.normal() / Math.sqrt(this.gamma(df / 2, df / 2));
+  }
+
+  /** Negative binomial with mean `mu` and shape `phi` (variance mu + mu²/phi). */
+  negBinomial(mu: number, phi: number): number {
+    return this.poisson(this.gamma(phi, phi / mu));
+  }
+
   /** Pick an index with probability proportional to `weights`. */
   categorical(weights: ArrayLike<number>): number {
     let total = 0;
