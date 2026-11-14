@@ -18,9 +18,15 @@ export function fitModel(input: GlmmInput, options: FitOptions, onProgress: (fra
   const start = Date.now();
   const workers: Worker[] = [];
   let cancelled = false;
+  // A terminated worker never answers, so cancelling has to settle the promise itself.
+  let rejectOnCancel: (e: Error) => void = () => {};
+  const untilCancelled = new Promise<never>((_, reject) => {
+    rejectOnCancel = reject;
+  });
   const cancel = () => {
     cancelled = true;
     for (const w of workers) w.terminate();
+    rejectOnCancel(new Error("cancelled"));
   };
   const progress = new Array<number>(nChains).fill(0);
   const report = () => onProgress(progress.reduce((a, b) => a + b, 0) / nChains, "Sampling");
@@ -65,7 +71,7 @@ export function fitModel(input: GlmmInput, options: FitOptions, onProgress: (fra
     return out;
   };
 
-  const promise = (async () => {
+  const work = (async () => {
     let chains: ChainResult[];
     let useWorkers = true;
     try {
@@ -90,5 +96,5 @@ export function fitModel(input: GlmmInput, options: FitOptions, onProgress: (fra
     await new Promise((r) => setTimeout(r, 20));
     return summarizeFit(input, chains, options, (Date.now() - start) / 1000);
   })();
-  return { promise, cancel };
+  return { promise: Promise.race([work, untilCancelled]), cancel };
 }

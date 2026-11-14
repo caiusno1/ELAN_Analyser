@@ -146,7 +146,7 @@ export function describeLayer(files: CorpusFile[], scheme: TierScheme, opts: Des
       { name: "n", type: "number", label: "number of annotations" },
       { name: "total_duration_s", type: "number" }, { name: "mean_duration_s", type: "number" },
       { name: "median_duration_s", type: "number" }, { name: "sd_duration_s", type: "number" },
-      { name: "rate_per_min", type: "number", label: "annotations per minute of recording" },
+      { name: "rate_per_min", primary: true, type: "number", label: "annotations per minute of recording" },
       { name: "coverage", type: "number", label: "share of the recording covered (0–1)" },
       { name: "latency_s", type: "number", label: "time of the first annotation" },
       { name: "observed_min", type: "number", label: "length of the recording in minutes (exposure)" },
@@ -160,7 +160,7 @@ export function describeLayer(files: CorpusFile[], scheme: TierScheme, opts: Des
     [
       { name: "file", type: "string" }, ...metaSpec,
       { name: "participant", type: "string" }, { name: "tier", type: "string" }, { name: "value", type: "string" },
-      { name: "start_s", type: "number" }, { name: "end_s", type: "number" }, { name: "duration_s", type: "number" },
+      { name: "start_s", type: "number" }, { name: "end_s", type: "number" }, { name: "duration_s", primary: true, type: "number" },
       { name: "words", type: "number", label: "number of whitespace-separated words in the value" },
     ],
   );

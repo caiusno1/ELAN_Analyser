@@ -7,12 +7,12 @@ import { ChartCard } from "../charts/ChartCard.tsx";
 import { XYChart } from "../charts/XYChart.tsx";
 import { useViewState } from "../hooks.ts";
 import { Callout, Card, Empty, Field, fmt, fmtBf, MethodNote, NumberField, Segmented, Select } from "../kit.tsx";
-import { BfHeadline, DroppedNote, numberOf, PosteriorChart, textOf, variableOptions } from "./common.tsx";
+import { BfHeadline, defaultOutcome, DroppedNote, numberOf, PosteriorChart, textOf, variableOptions } from "./common.tsx";
 
 export function CorrelationPanel({ ds }: { ds: Dataset }) {
   const numeric = variableOptions(ds, "number");
-  const [x, setX] = useViewState(`stats.cor.x.${ds.id}`, numeric[0]?.value ?? "");
-  const [y, setY] = useViewState(`stats.cor.y.${ds.id}`, numeric[1]?.value ?? numeric[0]?.value ?? "");
+  const [x, setX] = useViewState(`stats.cor.x.${ds.id}`, defaultOutcome(ds, defaultOutcome(ds)));
+  const [y, setY] = useViewState(`stats.cor.y.${ds.id}`, defaultOutcome(ds));
   const [kappa, setKappa] = useViewState(`stats.cor.kappa.${ds.id}`, 1);
   const [alternative, setAlternative] = useViewState<Alternative>(`stats.cor.alt.${ds.id}`, "two-sided");
   const labelCol = ds.columns.find((c) => c.type === "string")?.name;

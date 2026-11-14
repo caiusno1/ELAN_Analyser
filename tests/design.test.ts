@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { datasetFromRows } from "../src/core/data/dataset.ts";
-import { buildModel, formulaOf } from "../src/core/stats/design.ts";
+import { buildModel, formulaOf, termTests } from "../src/core/stats/design.ts";
 
 const ds = datasetFromRows("t", "row", "", [
   { y: 1.5, x: 1, cond: "b", g: "s1", t: 2, n: 5 },
@@ -44,5 +44,28 @@ describe("buildModel", () => {
     expect(() => buildModel(ds, { outcome: "x", family: "binomial", predictors: [], random: [] })).toThrow(/trials/);
     const one = datasetFromRows("o", "row", "", [{ y: 1, c: "a" }, { y: 2, c: "a" }, { y: 3, c: "a" }], [{ name: "y" }, { name: "c", type: "string" }]);
     expect(() => buildModel(one, { outcome: "y", family: "gaussian", predictors: ["c"], random: [] })).toThrow(/only one value/);
+  });
+});
+
+describe("termTests", () => {
+  it("gives every term a reduced model on the same rows", () => {
+    const spec = { outcome: "y", family: "gaussian" as const, predictors: ["x", "cond"], random: ["g"] };
+    const full = buildModel(ds, spec);
+    const tests = termTests(spec);
+    expect(tests.map((t) => t.term)).toEqual(["x", "cond"]);
+    const withoutCond = buildModel(ds, tests[1]!.reduced!);
+    // Leaving out "cond" must not bring back the row in which it is missing.
+    expect(withoutCond.rowsUsed).toBe(full.rowsUsed);
+    expect(withoutCond.input.columns.map((c) => c.name)).toEqual(["x"]);
+    expect(Array.from(withoutCond.input.y)).toEqual(Array.from(full.input.y));
+    expect(withoutCond.formula).toBe("y ~ x + (1 | g)");
+  });
+
+  it("tests an interaction, but not the predictors inside it", () => {
+    const tests = termTests({ outcome: "y", family: "gaussian", predictors: ["x", "cond", "t"], interactions: [["x", "cond"]], random: [] });
+    expect(tests.map((t) => [t.term, t.reason ?? "ok"])).toEqual([["x", "part of an interaction"], ["cond", "part of an interaction"], ["t", "ok"], ["x × cond", "ok"]]);
+    expect(tests[3]!.reduced!.interactions).toBeUndefined();
+    expect(tests[3]!.reduced!.predictors).toEqual(["x", "cond", "t"]);
+    expect(tests[2]!.reduced!.interactions).toEqual([["x", "cond"]]);
   });
 });

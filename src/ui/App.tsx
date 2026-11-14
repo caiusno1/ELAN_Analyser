@@ -65,7 +65,7 @@ const NAV: { group: string; items: NavEntry[] }[] = [
   {
     group: "Infer",
     items: [
-      { id: "statistics", label: "Statistics", icon: "statistics", title: "Bayesian statistics", lede: "Bayes factors and posterior estimates for any table produced by the analyses." },
+      { id: "statistics", label: "Statistics", icon: "statistics", title: "Bayesian statistics", lede: "Bayes factors and posterior estimates for any table produced by the analyses.", always: true },
     ],
   },
   {
@@ -104,6 +104,7 @@ export function App() {
   const toasts = useStore((s) => s.toasts);
   const dismissToast = useStore((s) => s.dismissToast);
   const loadFiles = useStore((s) => s.loadFiles);
+  const importTables = useStore((s) => s.importTables);
   const [dragging, setDragging] = useState(false);
 
   // Open with the example corpus so that every view shows something real to work with.
@@ -111,7 +112,7 @@ export function App() {
     if (useStore.getState().files.length === 0) useStore.getState().loadDemo();
   }, []);
 
-  // Dropping .eaf files anywhere adds them to the corpus.
+  // Dropping .eaf files anywhere adds them to the corpus; dropped tables (.csv, .tsv) open in the statistics lab.
   useEffect(() => {
     const hasFiles = (e: DragEvent) => Array.from(e.dataTransfer?.types ?? []).includes("Files");
     const over = (e: DragEvent) => {
@@ -126,8 +127,14 @@ export function App() {
       if (!hasFiles(e)) return;
       e.preventDefault();
       setDragging(false);
-      void loadFiles(Array.from(e.dataTransfer?.files ?? []));
-      setView("corpus");
+      const dropped = Array.from(e.dataTransfer?.files ?? []);
+      const tables = dropped.filter((f) => /\.(csv|tsv|tab)$/i.test(f.name));
+      const rest = dropped.filter((f) => !tables.includes(f));
+      if (rest.length || tables.length === 0) {
+        void loadFiles(rest);
+        setView("corpus");
+      }
+      if (tables.length) void importTables(tables);
     };
     window.addEventListener("dragover", over);
     window.addEventListener("dragleave", leave);
@@ -137,7 +144,7 @@ export function App() {
       window.removeEventListener("dragleave", leave);
       window.removeEventListener("drop", drop);
     };
-  }, [loadFiles, setView]);
+  }, [loadFiles, importTables, setView]);
 
   const overview = useMemo(() => corpusOverview(files, scheme), [files, scheme]);
   const entry = NAV.flatMap((g) => g.items).find((i) => i.id === view)!;
@@ -188,6 +195,7 @@ export function App() {
         <div style={{ position: "fixed", inset: 0, zIndex: 80, display: "grid", placeItems: "center", background: "color-mix(in srgb, var(--bg) 82%, transparent)", pointerEvents: "none" }}>
           <div className="dropzone over" style={{ background: "var(--surface)", minWidth: 280 }}>
             <strong>Drop .eaf files to add them to the corpus</strong>
+            <div className="muted">Tables (.csv, .tsv) open in Statistics.</div>
           </div>
         </div>
       )}

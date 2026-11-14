@@ -190,7 +190,7 @@ export function diversityDataset(files: CorpusFile[], scheme: TierScheme, layer:
     { name: "ttr", type: "number", label: "type–token ratio (depends on text length)" },
     { name: "guiraud", type: "number", label: "types / √tokens" },
     { name: "herdan", type: "number", label: "ln types / ln tokens" },
-    { name: "mattr", type: "number", label: "moving-average TTR, window 50" },
+    { name: "mattr", primary: true, type: "number", label: "moving-average TTR, window 50" },
     { name: "mtld", type: "number", label: "measure of textual lexical diversity" },
     { name: "yule_k", type: "number", label: "Yule's K (higher = more repetitive)" },
     { name: "hapax", type: "number", label: "types that occur once" },

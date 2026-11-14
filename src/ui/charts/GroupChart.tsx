@@ -28,7 +28,8 @@ export function GroupChart({ groups, yLabel, xLabel, height = 260, zero }: { gro
     const intervals: Extract<Mark, { type: "interval" }>["data"] = [];
     const means: Extract<Mark, { type: "dot" }>["data"] = [];
     groups.forEach((g, gi) => {
-      const color = g.color ?? `var(--series-${(gi % 8) + 1})`;
+      // With more groups than the palette has colours, colour would repeat and mislead: the axis labels identify the groups.
+      const color = g.color ?? (groups.length > 8 ? "var(--series-1)" : `var(--series-${gi + 1})`);
       const vals = g.values.filter((v) => Number.isFinite(v));
       const n = vals.length;
       vals.forEach((v, i) => {

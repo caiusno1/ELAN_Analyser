@@ -276,7 +276,7 @@ export function analyseTurnTaking(files: CorpusFile[], scheme: TierScheme, opts:
     [
       { name: "file", type: "string" }, ...metaSpec,
       { name: "from", type: "string" }, { name: "to", type: "string" }, { name: "direction", type: "string" },
-      { name: "fto_ms", type: "number", label: "floor transfer offset in ms (gap > 0, overlap < 0)" },
+      { name: "fto_ms", primary: true, type: "number", label: "floor transfer offset in ms (gap > 0, overlap < 0)" },
       { name: "kind", type: "string" }, { name: "time_s", type: "number" },
       { name: "relative_time", type: "number", label: "position in the recording (0–1)" },
     ],
@@ -289,7 +289,7 @@ export function analyseTurnTaking(files: CorpusFile[], scheme: TierScheme, opts:
     [
       { name: "file", type: "string" }, ...metaSpec, { name: "speaker", type: "string" },
       { name: "talkspurts", type: "number" }, { name: "speaking_time_s", type: "number" },
-      { name: "mean_talkspurt_s", type: "number" }, { name: "speaking_share", type: "number", label: "share of all speaking time" },
+      { name: "mean_talkspurt_s", type: "number" }, { name: "speaking_share", primary: true, type: "number", label: "share of all speaking time" },
       { name: "turns_taken", type: "number", label: "floor transfers to this speaker" },
       { name: "median_fto_ms", type: "number", label: "median offset when taking the floor" },
       { name: "overlap_share", type: "number", label: "share of the recording with overlapping speech" },

@@ -17,6 +17,42 @@ export interface ModelSpec {
   exposure?: string;
   /** Binomial: number of trials. */
   trials?: string;
+  /**
+   * Further variables that must not be missing in the rows used, although they are not in
+   * the model. This keeps a reduced model on exactly the rows of the full model.
+   */
+  completeFor?: string[];
+}
+
+/** A fixed-effect term and the model that results from leaving it out. */
+export interface TermTest {
+  term: string;
+  /** The model without the term; undefined if the term cannot be tested on its own. */
+  reduced?: ModelSpec;
+  /** Why the term cannot be tested. */
+  reason?: string;
+}
+
+/**
+ * The fixed-effect terms of a model, each with the reduced model that tests it. A predictor
+ * that is part of an interaction is not tested on its own: without it the interaction would
+ * mean something else (principle of marginality).
+ */
+export function termTests(spec: ModelSpec): TermTest[] {
+  const interactions = spec.interactions ?? [];
+  const out: TermTest[] = spec.predictors.map((p) => {
+    if (interactions.some(([a, b]) => a === p || b === p)) return { term: p, reason: "part of an interaction" };
+    const reduced: ModelSpec = { ...spec, predictors: spec.predictors.filter((q) => q !== p), completeFor: [...(spec.completeFor ?? []), p] };
+    return { term: p, reduced };
+  });
+  for (const pair of interactions) {
+    const rest = interactions.filter((q) => q !== pair);
+    const reduced: ModelSpec = { ...spec };
+    if (rest.length) reduced.interactions = rest;
+    else delete reduced.interactions;
+    out.push({ term: `${pair[0]} × ${pair[1]}`, reduced });
+  }
+  return out;
 }
 
 export interface BuiltModel {
@@ -66,7 +102,7 @@ export function formulaOf(spec: ModelSpec): string {
  */
 export function buildModel(ds: Dataset, spec: ModelSpec): BuiltModel {
   const asCategory = new Set(spec.asCategory ?? []);
-  const need = [spec.outcome, ...spec.predictors, ...spec.random, ...(spec.exposure ? [spec.exposure] : []), ...(spec.trials ? [spec.trials] : [])];
+  const need = [spec.outcome, ...spec.predictors, ...spec.random, ...(spec.exposure ? [spec.exposure] : []), ...(spec.trials ? [spec.trials] : []), ...(spec.completeFor ?? [])];
   for (const v of need) if (!column(ds, v)) throw new Error(`The table has no variable “${v}”.`);
   for (const [a, b] of spec.interactions ?? []) {
     if (!spec.predictors.includes(a) || !spec.predictors.includes(b)) throw new Error("Both variables of an interaction must also be predictors.");
@@ -76,7 +112,7 @@ export function buildModel(ds: Dataset, spec: ModelSpec): BuiltModel {
   const keep: number[] = [];
   for (let i = 0; i < ds.rowCount; i++) {
     let ok = Number.isFinite(cellNumber(ds, spec.outcome, i));
-    for (const p of spec.predictors) {
+    for (const p of [...spec.predictors, ...(spec.completeFor ?? [])]) {
       if (!ok) break;
       ok = isCategorical(ds, p, asCategory) ? cellString(ds, p, i).trim() !== "" : Number.isFinite(cellNumber(ds, p, i));
     }

@@ -160,7 +160,7 @@ export function analyseLags(files: CorpusFile[], scheme: TierScheme, opts: LagOp
       { name: "file", type: "string" }, ...metaVars.map((v) => ({ name: v, type: "string" as const, label: "file variable" })),
       { name: "x_participant", type: "string" }, { name: "y_participant", type: "string" },
       { name: "x_value", type: "string" }, { name: "y_value", type: "string" },
-      { name: "lag_ms", type: "number", label: "target time − reference time" },
+      { name: "lag_ms", primary: true, type: "number", label: "target time − reference time" },
       { name: "reference_time_s", type: "number" },
     ],
   );

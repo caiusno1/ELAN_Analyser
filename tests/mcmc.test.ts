@@ -6,6 +6,7 @@ import { GlmmModel, type Family, type GlmmInput } from "../src/core/stats/mcmc/g
 import { runNuts } from "../src/core/stats/mcmc/nuts.ts";
 import { mean, sd } from "../src/core/stats/describe.ts";
 import { normalLogPdf, poissonLogPmf } from "../src/core/stats/distributions.ts";
+import { cholesky, forwardSolve } from "../src/core/stats/linalg.ts";
 import { integrate, integrateInf } from "../src/core/stats/quadrature.ts";
 import { Rng } from "../src/core/stats/rng.ts";
 
@@ -250,11 +251,71 @@ describe("bridge sampling", () => {
     const nul = fitGlmm({ family: "gaussian", y, columns: [], random: [] }, o);
     const bridgeLogBf = full.bridge!.logMarginal - nul.bridge!.logMarginal;
     const sdLogBf = full.summaries.find((p) => p.name === "x")!.logBf10!;
-    expect(full.summaries.find((p) => p.name === "x")!.bfMethod).toBe("kernel");
+    expect(sdLogBf).toBeDefined();
     expect(Math.abs(bridgeLogBf - sdLogBf), `bridge ${bridgeLogBf} vs Savage-Dickey ${sdLogBf}`).toBeLessThan(0.15);
     const cmp = compareWaic(full.waic, nul.waic);
     expect(Number.isFinite(cmp.elpdDiff)).toBe(true);
     expect(cmp.se).toBeGreaterThan(0);
+  });
+
+  it("does not extrapolate the Savage–Dickey ratio; marginal likelihoods of multilevel models are exact", () => {
+    // A predictor that varies between groups only: with the effect fixed at zero the group-level
+    // SD can absorb the difference, so the marginal posterior of the effect has heavy tails and a
+    // normal extrapolation of its density at zero would overstate the evidence enormously.
+    const rng = new Rng(21);
+    const G = 12;
+    const per = 10;
+    const n = G * per;
+    const idx = Int32Array.from({ length: n }, (_, i) => Math.floor(i / per));
+    const x = Float64Array.from(idx, (g) => (g < G / 2 ? 0 : 1));
+    const u = Array.from({ length: G }, () => rng.normal(0, 0.15));
+    const y = Float64Array.from({ length: n }, (_, i) => 1.2 * x[i]! + u[idx[i]!]! + rng.normal(0, 1));
+    const names = Array.from({ length: G }, (_, g) => `g${g}`);
+    const o = { chains: 4, warmup: 800, samples: 2500, seed: 5, bridge: true };
+    const random = [{ name: "g", index: idx, levelNames: names }];
+    const full = fitGlmm({ family: "gaussian", y, columns: [{ name: "x", values: x }], random }, o);
+    const reduced = fitGlmm({ family: "gaussian", y, columns: [], random }, o);
+    const coef = full.summaries.find((p) => p.name === "x")!;
+    expect(coef.pd).toBeGreaterThan(0.999);
+    expect(coef.logBf10).toBeUndefined();
+
+    // Exact marginal likelihoods: intercept, slope and group effects integrate out analytically
+    // (y is multivariate normal given the two standard deviations); the rest is a 2-D integral.
+    const sY = sd(y);
+    const xz = Float64Array.from(x, (v) => (v - mean(x)) / sd(x));
+    const exact = (withSlope: boolean): number => {
+      const k = G + 1 + (withSlope ? 1 : 0);
+      const col = (j: number, i: number) => (j < G ? (idx[i] === j ? 1 : 0) : j === G ? 1 : xz[i]!);
+      const r = Float64Array.from(y, (v) => v - mean(y));
+      const utu = Array.from({ length: k }, (_, a) => Array.from({ length: k }, (_, b) => { let t = 0; for (let i = 0; i < n; i++) t += col(a, i) * col(b, i); return t; }));
+      const utr = Array.from({ length: k }, (_, a) => { let t = 0; for (let i = 0; i < n; i++) t += col(a, i) * r[i]!; return t; });
+      const rr = r.reduce((t, v) => t + v * v, 0);
+      const priorVar = (j: number, tau: number) => (j < G ? tau * tau : (2.5 * sY) ** 2);
+      const logJoint = (sigma: number, tau: number): number => {
+        const s2 = sigma * sigma;
+        const a = utu.map((row, i) => row.map((v, j) => v / s2 + (i === j ? 1 / priorVar(j, tau) : 0)));
+        const l = cholesky(a)!;
+        const w = forwardSolve(l, utr);
+        let logDet = 2 * n * Math.log(sigma);
+        for (let j = 0; j < k; j++) logDet += Math.log(priorVar(j, tau)) + 2 * Math.log(l[j]![j]!);
+        const quad = rr / s2 - w.reduce((t, v) => t + v * v, 0) / (s2 * s2);
+        return -0.5 * n * Math.log(2 * Math.PI) - 0.5 * logDet - 0.5 * quad + 2 * Math.log(1 / sY) - (sigma + tau) / sY;
+      };
+      let peak = -Infinity;
+      for (let a = 0.6; a <= 1.6; a += 0.02) for (let b = 0.01; b <= 2; b += 0.02) peak = Math.max(peak, logJoint(a, b));
+      const inner = (tau: number) => integrate((sigma) => Math.exp(logJoint(sigma, tau) - peak), 0.3, 3, { points: [0.8, 0.9, 1, 1.1, 1.2], relTol: 1e-8 }).value;
+      return peak + Math.log(integrate(inner, 1e-6, 6, { points: [0.05, 0.15, 0.3, 0.6, 1, 2], relTol: 1e-7 }).value);
+    };
+    const exactFull = exact(true);
+    const exactReduced = exact(false);
+    expect(Math.abs(full.bridge!.logMarginal - exactFull), `full: bridge ${full.bridge!.logMarginal} vs exact ${exactFull}`).toBeLessThan(0.1);
+    expect(Math.abs(reduced.bridge!.logMarginal - exactReduced), `reduced: bridge ${reduced.bridge!.logMarginal} vs exact ${exactReduced}`).toBeLessThan(0.1);
+
+    // What the extrapolation would have claimed, against the true evidence.
+    const extrapolated = normalLogPdf(0, 0, coef.priorSd!) - normalLogPdf(0, coef.mean, coef.sd);
+    const truth = exactFull - exactReduced;
+    expect(truth).toBeGreaterThan(Math.log(10));
+    expect(extrapolated - truth, `extrapolated ${extrapolated} vs exact ${truth}`).toBeGreaterThan(Math.log(20));
   });
 
   it("works with group-level effects", () => {

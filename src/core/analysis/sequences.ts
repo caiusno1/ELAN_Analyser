@@ -297,7 +297,7 @@ export function transitionDataset(result: SequenceResult, name: string): Dataset
   }));
   return datasetFromRows(name, "one ordered pair of event types", "Transition counts and probabilities.", rows, [
     { name: "from", type: "string" }, { name: "to", type: "string" }, { name: "count", type: "number" },
-    { name: "probability", type: "number", label: "posterior mean of P(to | from)" },
+    { name: "probability", primary: true, type: "number", label: "posterior mean of P(to | from)" },
     { name: "ci_lower", type: "number" }, { name: "ci_upper", type: "number" },
     { name: "base_rate", type: "number", label: "share of all transitions that lead to this event" },
     { name: "lift", type: "number", label: "probability / base rate" },

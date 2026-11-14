@@ -342,7 +342,7 @@ export function cooccurrence(files: CorpusFile[], scheme: TierScheme, opts: Cooc
       { name: "joint_s", type: "number", label: "time both are present" },
       { name: "x_time_s", type: "number" }, { name: "y_time_s", type: "number" },
       { name: "expected_joint_s", type: "number", label: "joint time expected under independence" },
-      { name: "log_lift", type: "number", label: "ln(observed / expected joint time)" },
+      { name: "log_lift", primary: true, type: "number", label: "ln(observed / expected joint time)" },
       { name: "log_odds_ratio", type: "number", label: "ln of the time-based odds ratio" },
       { name: "p_y_given_x", type: "number", label: "share of X time during which Y is present" },
     ],

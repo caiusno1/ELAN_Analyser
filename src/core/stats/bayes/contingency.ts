@@ -13,10 +13,10 @@ import { betaI, lgamma, solveMonotone } from "../special.ts";
 export type SamplingScheme = "poisson" | "jointMultinomial" | "independentRows" | "independentCols";
 
 export const SCHEME_LABEL: Record<SamplingScheme, string> = {
-  poisson: "Poisson (nothing fixed)",
-  jointMultinomial: "Joint multinomial (total fixed)",
-  independentRows: "Independent multinomial (row totals fixed)",
-  independentCols: "Independent multinomial (column totals fixed)",
+  poisson: "Nothing fixed (Poisson)",
+  jointMultinomial: "Total fixed (joint multinomial)",
+  independentRows: "Row totals fixed (indep. multinomial)",
+  independentCols: "Column totals fixed (indep. multinomial)",
 };
 
 /** ln of the Dirichlet function D(v) = ΠΓ(v_i) / Γ(Σv_i). */

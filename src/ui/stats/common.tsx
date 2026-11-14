@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
-import { column, levelsOf, type Dataset } from "../../core/data/dataset.ts";
+import { column, levelsOf, type Dataset, type NumberColumn } from "../../core/data/dataset.ts";
 import { evidenceLabel } from "../../core/stats/bayes/proportions.ts";
-import { XYChart, type Mark } from "../charts/XYChart.tsx";
+import { XYChart, type AxisSpec, type Mark } from "../charts/XYChart.tsx";
 import { fmtBf } from "../kit.tsx";
 
 /** Variables of a dataset, optionally of one type only. */
@@ -10,19 +10,45 @@ export function variableOptions(ds: Dataset, type?: "number" | "string", none?: 
   return [...(none !== undefined ? [{ value: "", label: none }] : []), ...cols.map((c) => ({ value: c.name, label: c.name }))];
 }
 
-/** Variables that can define groups: text variables, and numeric ones with few distinct values. */
-export function groupingOptions(ds: Dataset, none?: string): { value: string; label: string }[] {
-  const out = none !== undefined ? [{ value: "", label: none }] : [];
+/** Variables that can define groups (text variables, and numeric ones with few distinct values) with their number of groups. */
+function groupings(ds: Dataset): { name: string; k: number; numeric: boolean }[] {
+  const out: { name: string; k: number; numeric: boolean }[] = [];
   for (const c of ds.columns) {
     if (c.type === "string") {
       const k = new Set(c.values).size;
-      if (k >= 2 && k <= Math.max(60, ds.rowCount / 2)) out.push({ value: c.name, label: `${c.name} (${k} groups)` });
+      if (k >= 2 && k <= Math.max(60, ds.rowCount / 2)) out.push({ name: c.name, k, numeric: false });
     } else {
       const k = new Set(Array.from(c.values).filter((v) => !Number.isNaN(v))).size;
-      if (k >= 2 && k <= 8) out.push({ value: c.name, label: `${c.name} (${k} values)` });
+      if (k >= 2 && k <= 8) out.push({ name: c.name, k, numeric: true });
     }
   }
   return out;
+}
+
+export function groupingOptions(ds: Dataset, none?: string): { value: string; label: string }[] {
+  return [...(none !== undefined ? [{ value: "", label: none }] : []), ...groupings(ds).map((g) => ({ value: g.name, label: `${g.name} (${g.k} ${g.numeric ? "values" : "groups"})` }))];
+}
+
+/** Variables that say which speaker or tier a row belongs to: possible groupings, but rarely the comparison of interest. */
+const LABEL_LIKE = /^(file|participant|speaker|tier|from|to|direction|rater|annotator|prime_speaker|[xy]_(tier|participant)|tier_[12])$/i;
+/** Variables that count, locate or identify rows rather than measure something. */
+const NOT_A_MEASURE = /^(n|n_rows|n_[12xy]|count|index|id|round|trial|units|tokens|content_tokens|(start|end|time|reference_time)(_s|_ms)?|relative_time|observed_min|duration_min)$/i;
+
+/** A sensible grouping variable to start with: one with two groups (or with a few), preferably a variable of the study design. */
+export function defaultGrouping(ds: Dataset, want: "two" | "several" = "two"): string {
+  // Fewest groups first (stable), so that "several" prefers 4 annotation values over 12 recordings.
+  const g = groupings(ds).sort((a, b) => a.k - b.k);
+  const fits = (x: { k: number }) => (want === "two" ? x.k === 2 : x.k >= 3 && x.k <= 12);
+  const design = (x: { name: string }) => !LABEL_LIKE.test(x.name);
+  return (g.find((x) => fits(x) && design(x)) ?? g.find(fits) ?? g.find((x) => design(x) && x.k <= 12) ?? g.find(design) ?? g[0])?.name ?? "";
+}
+
+/** A sensible outcome to start with: the main measure of the table, or the first numeric variable that measures something. */
+export function defaultOutcome(ds: Dataset, exclude?: string): string {
+  const numeric = ds.columns.filter((c): c is NumberColumn => c.type === "number" && c.name !== exclude);
+  if (ds.primary && numeric.some((c) => c.name === ds.primary)) return ds.primary;
+  const varies = (c: NumberColumn) => new Set(Array.from(c.values).filter((v) => !Number.isNaN(v))).size > 1;
+  return (numeric.find((c) => !NOT_A_MEASURE.test(c.name) && varies(c)) ?? numeric.find(varies) ?? numeric[0])?.name ?? "";
 }
 
 export function textOf(ds: Dataset, name: string, i: number): string {
@@ -148,17 +174,42 @@ export function DroppedNote({ dropped }: { dropped: number }): ReactNode {
   return <p className="faint">{dropped} row{dropped === 1 ? " was" : "s were"} left out because of missing values.</p>;
 }
 
-export const BF_THRESHOLDS: { y: number; label: string }[] = [
-  { y: Math.log(3), label: "3" },
-  { y: Math.log(10), label: "10" },
-  { y: -Math.log(3), label: "1/3" },
-  { y: -Math.log(10), label: "1/10" },
-];
+const SUPERSCRIPT = "⁰¹²³⁴⁵⁶⁷⁸⁹";
+
+function bfNumber(bf: number): string {
+  if (bf < 1e5) return String(Number(bf.toPrecision(2)));
+  const e = Math.round(Math.log10(bf));
+  if (Math.abs(bf / Math.pow(10, e) - 1) < 0.01) return `10${String(e).replace(/\d/g, (d) => SUPERSCRIPT[Number(d)]!)}`;
+  return bf.toExponential(0).replace("e+", "e");
+}
 
 /** Tick format for an axis that shows ln BF as a Bayes factor. */
 export function bfTick(v: number): string {
   const bf = Math.exp(v);
-  if (bf >= 1) return bf >= 1000 ? bf.toExponential(0).replace("e+", "e") : String(Number(bf.toPrecision(2)));
-  const inv = 1 / bf;
-  return inv >= 1000 ? `1/${inv.toExponential(0).replace("e+", "e")}` : `1/${Number(inv.toPrecision(2))}`;
+  if (Math.abs(v) < 1e-9) return "1";
+  return bf >= 1 ? bfNumber(bf) : `1/${bfNumber(1 / bf)}`;
+}
+
+/**
+ * A y axis for ln BF with ticks at the conventional evidence thresholds (1/10, 1/3, 1, 3, 10, …).
+ * The range always includes 1/3 … 3, so that fluctuations around "no evidence" look as small as they are.
+ */
+export function bfAxis(logBfs: Iterable<number>, label: string): AxisSpec {
+  let lo = -Math.log(3);
+  let hi = Math.log(3);
+  for (const v of logBfs) {
+    if (!Number.isFinite(v)) continue;
+    if (v < lo) lo = v;
+    if (v > hi) hi = v;
+  }
+  const pad = (hi - lo) * 0.07;
+  const decades = (hi - lo) / Math.LN10;
+  const ticks: number[] = [0];
+  if (decades <= 5) {
+    for (let e = 0; e <= 6; e++) for (const m of [3, 10]) ticks.push(Math.log(m) + e * Math.LN10, -(Math.log(m) + e * Math.LN10));
+  } else {
+    const step = Math.ceil(decades / 7);
+    for (let e = step; e <= 400; e += step) ticks.push(e * Math.LN10, -e * Math.LN10);
+  }
+  return { type: "linear", domain: [lo - pad, hi + pad], label, format: bfTick, tickValues: ticks.sort((a, b) => a - b) };
 }

@@ -39,10 +39,12 @@ export interface ParamSummary {
   essTail: number;
   /** Coefficients only: prior SD on the original predictor scale. */
   priorSd?: number;
-  /** Coefficients only: ln BF10 against β = 0 by the Savage–Dickey density ratio. */
+  /**
+   * Coefficients only: ln BF10 against β = 0 by the Savage–Dickey density ratio. Given only
+   * when zero lies inside the region covered by the draws, so that the posterior density
+   * there can be estimated; it is never extrapolated (see `logDensityAtZero`).
+   */
   logBf10?: number;
-  /** How the posterior density at zero was estimated. */
-  bfMethod?: "kernel" | "normal-tail";
   /** Coefficients only: posterior mass inside the region of practical equivalence. */
   rope?: number;
   /** Half-width of the ROPE on the coefficient's own scale. */
@@ -115,19 +117,23 @@ function ropeHalfWidthFor(family: Family, yScale: number): number {
   return 0.1 * yScale;
 }
 
-/** ln of the posterior density at zero, from draws. */
-function logDensityAtZero(draws: Float64Array): { logDensity: number; method: "kernel" | "normal-tail" } {
-  const m = mean(draws);
-  const s = sd(draws);
+/**
+ * ln of the posterior density at zero, from draws — or undefined if too few draws lie
+ * beyond zero for a kernel estimate.
+ *
+ * The density is deliberately not extrapolated from a normal approximation: in multilevel
+ * models the marginal posterior of a coefficient has much heavier tails than a normal
+ * distribution (group-level variances can absorb an effect), and an extrapolated
+ * Savage–Dickey ratio can overstate the evidence by orders of magnitude. Strong effects
+ * are tested by comparing marginal likelihoods instead (bridge sampling).
+ */
+function logDensityAtZero(draws: Float64Array): number | undefined {
   let below = 0;
   for (let i = 0; i < draws.length; i++) if (draws[i]! < 0) below++;
   const minority = Math.min(below, draws.length - below);
-  // A kernel estimate needs draws on both sides of zero; otherwise extrapolate the tail.
-  if (minority >= Math.max(20, 0.005 * draws.length)) {
-    const k = kde(draws, { points: 3, lo: -1e-9, hi: 1e-9 });
-    return { logDensity: Math.log(k.y[1]!), method: "kernel" };
-  }
-  return { logDensity: normalLogPdf(0, m, s), method: "normal-tail" };
+  if (minority < Math.max(20, 0.005 * draws.length)) return undefined;
+  const k = kde(draws, { points: 3, lo: -1e-9, hi: 1e-9 });
+  return Math.log(k.y[1]!);
 }
 
 /** Combine chains into summaries, diagnostics, WAIC, posterior predictive draws and (optionally) a bridge estimate. */
@@ -215,8 +221,7 @@ export function summarizeFit(input: GlmmInput, chains: ChainResult[], options: F
       const priorSd = model.coefPriorSd(idx);
       const at0 = logDensityAtZero(x);
       summary.priorSd = priorSd;
-      summary.logBf10 = normalLogPdf(0, 0, priorSd) - at0.logDensity;
-      summary.bfMethod = at0.method;
+      if (at0 !== undefined) summary.logBf10 = normalLogPdf(0, 0, priorSd) - at0;
       // The ROPE is defined for a standardised predictor: rescale it to this coefficient.
       const colSd = sd(input.columns[idx - 1]!.values);
       const half = ropeHalf / colSd;

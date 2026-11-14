@@ -1,6 +1,7 @@
 import { useMemo, useRef, useState } from "react";
 import type { Dataset } from "../../core/data/dataset.ts";
-import { buildModel, formulaOf, type BuiltModel, type ModelSpec } from "../../core/stats/design.ts";
+import { evidenceLabel } from "../../core/stats/bayes/proportions.ts";
+import { buildModel, formulaOf, termTests, type BuiltModel, type ModelSpec } from "../../core/stats/design.ts";
 import { kde, quantile } from "../../core/stats/describe.ts";
 import { compareWaic, type GlmmFit, type ParamSummary } from "../../core/stats/mcmc/fit.ts";
 import { FAMILY_INFO, type Family } from "../../core/stats/mcmc/glmm.ts";
@@ -9,7 +10,7 @@ import { XYChart, type Mark } from "../charts/XYChart.tsx";
 import { fitModel, type FitHandle } from "../compute.ts";
 import { useViewState } from "../hooks.ts";
 import { Button, Callout, Card, CheckList, DataTable, Empty, Field, fmt, fmtBf, MethodNote, NumberField, pct, Select, Toggle } from "../kit.tsx";
-import { groupingOptions, variableOptions } from "./common.tsx";
+import { defaultOutcome, groupingOptions, variableOptions } from "./common.tsx";
 
 interface Settings {
   outcome: string;
@@ -25,6 +26,20 @@ interface Settings {
   warmup: number;
   samples: number;
   bridge: boolean;
+  /** Fit one reduced model per term to get its Bayes factor. */
+  termTests: boolean;
+  /** Width of the prior on the effects, in SDs of the outcome per SD of the predictor. */
+  coefScale: number;
+}
+
+/** Evidence for one fixed-effect term: the model with the term against the model without it. */
+interface TermResult {
+  term: string;
+  logBf10?: number;
+  /** Approximate relative error of the Bayes factor. */
+  error?: number;
+  /** Why there is no Bayes factor. */
+  note?: string;
 }
 
 interface StoredModel {
@@ -36,6 +51,8 @@ interface StoredModel {
   rowsDropped: number;
   terms: BuiltModel["terms"];
   fit: GlmmFit;
+  coefScale: number;
+  termResults?: TermResult[];
 }
 
 let modelCounter = 0;
@@ -65,7 +82,7 @@ export function RegressionPanel({ ds }: { ds: Dataset }) {
   const numeric = variableOptions(ds, "number");
   const all = variableOptions(ds);
   const groupings = groupingOptions(ds);
-  const initialOutcome = numeric[numeric.length - 1]?.value ?? "";
+  const initialOutcome = defaultOutcome(ds);
   const [s, setS] = useViewState<Settings>(`stats.reg.${ds.id}`, {
     outcome: initialOutcome,
     family: guessFamily(ds, initialOutcome),
@@ -80,6 +97,8 @@ export function RegressionPanel({ ds }: { ds: Dataset }) {
     warmup: 1000,
     samples: 1000,
     bridge: true,
+    termTests: true,
+    coefScale: 2.5,
   });
   const patch = (p: Partial<Settings>) => setS((prev) => ({ ...prev, ...p }));
   const [models, setModels] = useViewState<StoredModel[]>(`stats.models.${ds.id}`, []);
@@ -102,21 +121,51 @@ export function RegressionPanel({ ds }: { ds: Dataset }) {
       setError((e as Error).message);
       return;
     }
-    setRunning({ fraction: 0, phase: "Starting" });
-    const h = fitModel(built.input, { chains: s.chains, warmup: s.warmup, samples: s.samples, seed: 2026, bridge: s.bridge }, (fraction, phase) => setRunning({ fraction, phase }));
-    handle.current = h;
-    h.promise
-      .then((fit) => {
-        const id = ++modelCounter;
-        const stored: StoredModel = { id, name: `Model ${id}`, spec, formula: built.formula, rowsUsed: built.rowsUsed, rowsDropped: built.rowsDropped, terms: built.terms, fit };
-        setModels((prev) => [...prev, stored]);
-        setSelectedId(id);
-        setRunning(undefined);
-      })
-      .catch((e: Error) => {
-        setRunning(undefined);
-        if (e.message !== "cancelled") setError(e.message);
+    const options = { chains: s.chains, warmup: s.warmup, samples: s.samples, seed: 2026, bridge: s.bridge };
+    const priors = { coefScale: s.coefScale };
+    const tests = s.bridge && s.termTests ? termTests(spec) : [];
+    const steps = 1 + tests.filter((t) => t.reduced).length;
+    let step = 0;
+    let cancelled = false;
+    const fitOne = (input: BuiltModel["input"], phase: string): Promise<GlmmFit> => {
+      const h = fitModel({ ...input, priors }, options, (fraction) => setRunning({ fraction: (step + fraction) / steps, phase }));
+      handle.current = {
+        promise: h.promise,
+        cancel: () => {
+          cancelled = true;
+          h.cancel();
+        },
+      };
+      return h.promise.then((fit) => {
+        step++;
+        return fit;
       });
+    };
+    setRunning({ fraction: 0, phase: "Starting" });
+    (async () => {
+      const fit = await fitOne(built.input, steps > 1 ? "Fitting the model" : "Sampling");
+      const termResults: TermResult[] = [];
+      for (const t of tests) {
+        if (cancelled) throw new Error("cancelled");
+        if (!t.reduced) {
+          termResults.push({ term: t.term, note: t.reason ?? "not tested" });
+          continue;
+        }
+        const reduced = await fitOne(buildModel(ds, t.reduced).input, `Testing “${t.term}”`);
+        if (fit.bridge && reduced.bridge && Number.isFinite(fit.bridge.logMarginal) && Number.isFinite(reduced.bridge.logMarginal)) {
+          termResults.push({ term: t.term, logBf10: fit.bridge.logMarginal - reduced.bridge.logMarginal, error: Math.hypot(fit.bridge.cv, reduced.bridge.cv) });
+        } else termResults.push({ term: t.term, note: "the marginal likelihood could not be estimated" });
+      }
+      const id = ++modelCounter;
+      const stored: StoredModel = { id, name: `Model ${id}`, spec, formula: built.formula, rowsUsed: built.rowsUsed, rowsDropped: built.rowsDropped, terms: built.terms, fit, coefScale: s.coefScale };
+      if (tests.length) stored.termResults = termResults;
+      setModels((prev) => [...prev, stored]);
+      setSelectedId(id);
+      setRunning(undefined);
+    })().catch((e: Error) => {
+      setRunning(undefined);
+      if (e.message !== "cancelled") setError(e.message);
+    });
   };
   const model = models.find((m) => m.id === selectedId) ?? models[models.length - 1];
 
@@ -154,7 +203,11 @@ export function RegressionPanel({ ds }: { ds: Dataset }) {
               <Field label="Draws per chain" htmlFor="rg-samples"><NumberField id="rg-samples" value={s.samples} min={100} max={20000} step={500} onChange={(v) => patch({ samples: Math.round(v) })} /></Field>
             </div>
             <Field label="Warm-up iterations" htmlFor="rg-warm"><NumberField id="rg-warm" value={s.warmup} min={100} max={10000} step={250} onChange={(v) => patch({ warmup: Math.round(v) })} /></Field>
-            <div style={{ marginTop: 9 }}><Toggle id="rg-bridge" checked={s.bridge} onChange={(bridge) => patch({ bridge })}>Marginal likelihood (for Bayes factors between models)</Toggle></div>
+            <Field label="Prior width of the effects" htmlFor="rg-prior" hint="Prior SD of an effect, in SDs of the outcome per SD of the predictor (on the link scale for counts and proportions). Bayes factors depend on it: the wider the prior, the more they favour “no effect”.">
+              <Select id="rg-prior" value={String(s.coefScale)} onChange={(v) => patch({ coefScale: Number(v) })} options={[{ value: "2.5", label: "2.5 — wide (default)" }, { value: "1", label: "1 — medium" }, { value: "0.5", label: "0.5 — narrow" }]} />
+            </Field>
+            <div style={{ marginTop: 9 }}><Toggle id="rg-bridge" checked={s.bridge} onChange={(bridge) => patch({ bridge })}>Marginal likelihood (for Bayes factors)</Toggle></div>
+            {s.bridge && <div style={{ marginTop: 6 }}><Toggle id="rg-terms" checked={s.termTests} onChange={(v) => patch({ termTests: v })}>Bayes factor for every term (one more fit per term)</Toggle></div>}
           </details>
           <div className="callout" style={{ marginTop: 12 }}><div className="mono" style={{ fontSize: 12, overflowWrap: "anywhere" }}>{formula}</div></div>
           <div className="row" style={{ marginTop: 10 }}>
@@ -174,13 +227,18 @@ export function RegressionPanel({ ds }: { ds: Dataset }) {
             in several chains that must agree (R̂ close to 1).
           </p>
           <p>
-            Priors are weakly informative and scale with the data: coefficients of standardised predictors ~ Normal(0, 2.5 · SD of the outcome), or Normal(0, 2.5) on the link scale for counts and proportions; standard deviations ~
-            Exponential.
+            Priors are weakly informative and scale with the data: coefficients of standardised predictors ~ Normal(0, w · SD of the outcome), or Normal(0, w) on the link scale for counts and proportions, with the prior width w = 2.5
+            unless you change it under “Sampling”; standard deviations ~ Exponential.
           </p>
           <p>
-            For each coefficient the table gives the probability of direction, the share of the posterior inside a region of practical equivalence around zero, and a Bayes factor against “no effect” (Savage–Dickey density ratio).
-            Whole models are compared by their marginal likelihood (bridge sampling) and by WAIC.
+            <strong>Evidence for a term</strong> is the Bayes factor of the model with the term against the same model without it, fitted to the same rows. Both marginal likelihoods are estimated by bridge sampling; the error column
+            says how precise the result is. A predictor inside an interaction is not tested on its own.
           </p>
+          <p>
+            For each coefficient the table also gives the probability of direction and the share of the posterior inside a region of practical equivalence around zero. A Bayes factor for a single coefficient (Savage–Dickey density
+            ratio) is shown only when zero lies within the posterior draws — it is never extrapolated, because in multilevel models that can overstate the evidence by orders of magnitude.
+          </p>
+          <p>Whole models are compared by their marginal likelihood and by WAIC (predictive accuracy).</p>
         </MethodNote>
       </div>
       <div className="stack">
@@ -208,7 +266,10 @@ function ModelResult({ model, models, onSelect, onRemove }: { model: StoredModel
   const fit = model.fit;
   const d = fit.diagnostics;
   const link = FAMILY_INFO[fit.family].link;
-  const ratio = link === "log" || link === "logit";
+  // On these scales an effect is multiplicative: exp(estimate) is a ratio.
+  const scale = fit.family === "lognormal" ? "log" : link === "log" || link === "logit" ? link : undefined;
+  const ratio = scale !== undefined;
+  const ratioName = fit.family === "lognormal" ? "a ratio of typical values (medians)" : link === "log" ? "a rate ratio" : "an odds ratio";
   const coefs = fit.summaries.filter((p) => p.kind === "coefficient");
   const others = fit.summaries.filter((p) => p.kind !== "coefficient");
   const effects = useMemo(() => {
@@ -251,7 +312,24 @@ function ModelResult({ model, models, onSelect, onRemove }: { model: StoredModel
         )}
       </Card>
 
-      <Card title="Effects" sub={ratio ? `Estimates are on the ${link} scale; “ratio” is exp(estimate): ${link === "log" ? "a rate ratio" : "an odds ratio"}.` : "Estimates are in the units of the outcome."} flush>
+      {model.termResults && model.termResults.length > 0 && (
+        <Card title="Evidence for each term" sub={`Bayes factor of this model against the same model without the term. Prior width of the effects: ${model.coefScale}.`} flush>
+          <DataTable<TermResult>
+            rows={model.termResults}
+            maxHeight={260}
+            rowKey={(r) => r.term}
+            csvName={`${model.name}_terms`}
+            columns={[
+              { key: "term", header: "Term", value: (r) => r.term },
+              { key: "bf", header: "BF₁₀", value: (r) => r.logBf10 ?? NaN, render: (r) => (r.logBf10 === undefined ? "–" : fmtBf(r.logBf10)), numeric: true, title: "Marginal likelihood of the model with the term, divided by that of the model without it" },
+              { key: "err", header: "± error", value: (r) => r.error ?? NaN, render: (r) => (r.error === undefined ? "" : pct(r.error, 0)), numeric: true, title: "Approximate relative error of the Bayes factor (from bridge sampling)" },
+              { key: "ev", header: "Reading", value: (r) => termReading(r), wrap: true },
+            ]}
+          />
+        </Card>
+      )}
+
+      <Card title="Effects" sub={ratio ? `Estimates are on the ${scale} scale; “ratio” is exp(estimate): ${ratioName}.` : "Estimates are in the units of the outcome."} flush>
         <DataTable<ParamSummary>
           rows={[...fit.summaries.filter((p) => p.kind === "intercept"), ...coefs]}
           csvName={`${model.name}_effects`}
@@ -263,7 +341,14 @@ function ModelResult({ model, models, onSelect, onRemove }: { model: StoredModel
             { key: "ci", header: "95% CrI", value: (p) => p.ci[0], render: (p) => `${fmt(p.ci[0])} – ${fmt(p.ci[1])}`, numeric: true },
             ...(ratio ? [{ key: "ratio", header: "Ratio", value: (p: ParamSummary) => Math.exp(p.median), numeric: true, title: "exp(median)" }] : []),
             { key: "pd", header: "P(direction)", value: (p) => p.pd, render: (p) => (p.kind === "coefficient" ? pct(p.pd) : ""), numeric: true, title: "Posterior probability that the effect has the sign of its estimate" },
-            { key: "bf", header: "BF₁₀", value: (p) => p.logBf10 ?? NaN, render: (p) => (p.logBf10 === undefined ? "" : `${p.bfMethod === "normal-tail" ? "≈ " : ""}${fmtBf(p.logBf10)}`), numeric: true, title: "Savage–Dickey Bayes factor against an effect of zero (≈: extrapolated from the tail)" },
+            {
+              key: "bf",
+              header: "BF₁₀",
+              value: (p) => p.logBf10 ?? NaN,
+              render: (p) => (p.kind !== "coefficient" ? "" : p.logBf10 === undefined ? <span title="Zero lies outside the posterior draws, so the density ratio cannot be estimated. See the evidence for the whole term.">–</span> : fmtBf(p.logBf10)),
+              numeric: true,
+              title: "Savage–Dickey density ratio against a coefficient of zero; given only when zero lies within the posterior draws",
+            },
             { key: "rope", header: "In ROPE", value: (p) => p.rope ?? NaN, render: (p) => (p.rope === undefined ? "" : pct(p.rope)), numeric: true, title: "Share of the posterior inside the region of practical equivalence around zero" },
             { key: "rhat", header: "R̂", value: (p) => p.rhat, numeric: true, digits: 3 },
             { key: "ess", header: "ESS", value: (p) => p.essBulk, render: (p) => String(Math.round(p.essBulk)), numeric: true },
@@ -276,7 +361,7 @@ function ModelResult({ model, models, onSelect, onRemove }: { model: StoredModel
           <ChartCard title="Effects with 95% credible intervals" sub="Dot: posterior median." table={{ columns: ["term", "median", "lower", "upper"], rows: coefs.map((p) => [p.name, p.median, p.ci[0], p.ci[1]]) }}>
             <XYChart
               height={Math.max(150, 56 + coefs.length * 26)}
-              x={{ type: "linear", label: `effect${ratio ? ` (${link} scale)` : ""}`, grid: true }}
+              x={{ type: "linear", label: `effect${ratio ? ` (${scale} scale)` : ""}`, grid: true }}
               y={{ type: "band", domain: coefs.map((p) => p.name), padding: 0.5 }}
               marks={[
                 { type: "rule", x: 0, color: "var(--text-2)" },
@@ -343,6 +428,7 @@ function ModelResult({ model, models, onSelect, onRemove }: { model: StoredModel
             columns={[
               { key: "name", header: "Model", value: (m) => m.name },
               { key: "formula", header: "Formula", value: (m) => m.formula },
+              ...(models.some((m) => m.coefScale !== reference.coefScale) ? [{ key: "prior", header: "Prior width", value: (m: StoredModel) => m.coefScale, numeric: true, digits: 2 }] : []),
               { key: "lml", header: "ln marginal likelihood", value: (m) => m.fit.bridge?.logMarginal ?? NaN, numeric: true, digits: 5 },
               { key: "bf", header: `BF vs. ${reference.name}`, value: (m) => (m.fit.bridge && reference.fit.bridge ? m.fit.bridge.logMarginal - reference.fit.bridge.logMarginal : NaN), render: (m) => (m.fit.bridge && reference.fit.bridge && sameRows ? fmtBf(m.fit.bridge.logMarginal - reference.fit.bridge.logMarginal) : "–"), numeric: true },
               { key: "cv", header: "± error", value: (m) => m.fit.bridge?.cv ?? NaN, render: (m) => (m.fit.bridge ? pct(m.fit.bridge.cv, 0) : "–"), numeric: true, title: "Approximate relative error of the marginal likelihood estimate" },
@@ -354,6 +440,15 @@ function ModelResult({ model, models, onSelect, onRemove }: { model: StoredModel
       )}
     </>
   );
+}
+
+/** A Bayes factor for a term in words. */
+function termReading(r: TermResult): string {
+  if (r.logBf10 === undefined) return r.note ? `Not tested: ${r.note}.` : "";
+  const ev = evidenceLabel(r.logBf10);
+  if (ev.favours === "neither") return "The data do not favour either model.";
+  const text = `${ev.strength.charAt(0).toUpperCase()}${ev.strength.slice(1)} evidence ${ev.favours === "H1" ? "for" : "against"} an effect of ${r.term}`;
+  return r.logBf10 < 0 ? `${text} (BF₀₁ = ${fmtBf(-r.logBf10)}).` : `${text}.`;
 }
 
 /** Observed and simulated distributions of the outcome, as lines. */

@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { inferScheme, listParticipants, stripExtension, uniqueName, type CorpusFile, type TierRole, type TierScheme } from "../core/corpus/corpus.ts";
-import { parseDelimited, type Dataset } from "../core/data/dataset.ts";
+import { datasetFromDelimited, decodeTextBytes, parseDelimited, type Dataset } from "../core/data/dataset.ts";
 import { generateDemoCorpus } from "../core/demo/demoCorpus.ts";
 import { decodeXmlBytes, parseEaf } from "../core/eaf/parser.ts";
 
@@ -52,6 +52,12 @@ interface AppState {
   resetScheme: () => void;
   addDataset: (ds: Dataset, open?: boolean) => void;
   removeDataset: (id: string) => void;
+  /** Read delimited text files (CSV, TSV) as tables for the statistics lab. */
+  importTables: (list: File[]) => Promise<void>;
+  /** Turn pasted delimited text into a table. Returns an error message if that fails. */
+  importTableText: (text: string, name: string) => string | undefined;
+  /** Replace a dataset (same id) in place, e.g. after a variable was added. */
+  updateDataset: (ds: Dataset) => void;
   setActiveDataset: (id: string) => void;
   showInTimeline: (ref: { fileId: string; start: number; end: number; tierId?: string }) => void;
   setViewState: (key: string, value: unknown) => void;
@@ -111,7 +117,7 @@ export const useStore = create<AppState>()((set, get) => ({
       scheme: inferScheme(files, get().isDemo ? undefined : get().scheme),
       busy: undefined,
       isDemo: false,
-      datasets: get().isDemo ? [] : get().datasets,
+      datasets: get().isDemo ? get().datasets.filter((d) => d.imported) : get().datasets,
     });
     if (added.length) {
       const warnings = added.reduce((s, f) => s + f.doc.warnings.length, 0);
@@ -128,7 +134,7 @@ export const useStore = create<AppState>()((set, get) => ({
       doc: parseEaf(d.xml, d.fileName),
       meta: { ...d.meta },
     }));
-    set({ files, scheme: inferScheme(files), isDemo: true, datasets: [], activeDataset: undefined, focus: undefined, viewState: {} });
+    set({ files, scheme: inferScheme(files), isDemo: true, datasets: get().datasets.filter((d) => d.imported), focus: undefined, viewState: {} });
   },
 
   removeFile: (id) => {
@@ -136,7 +142,7 @@ export const useStore = create<AppState>()((set, get) => ({
     set({ files, scheme: inferScheme(files, get().scheme) });
   },
 
-  clearCorpus: () => set({ files: [], scheme: {}, datasets: [], activeDataset: undefined, focus: undefined, isDemo: false, viewState: {} }),
+  clearCorpus: () => set({ files: [], scheme: {}, datasets: get().datasets.filter((d) => d.imported), focus: undefined, isDemo: false, viewState: {} }),
 
   replaceCorpus: (files, scheme) => set({ files, scheme: scheme ?? inferScheme(files, get().scheme) }),
 
@@ -233,6 +239,30 @@ export const useStore = create<AppState>()((set, get) => ({
   removeDataset: (id) => {
     const datasets = get().datasets.filter((d) => d.id !== id);
     set({ datasets, activeDataset: get().activeDataset === id ? datasets[datasets.length - 1]?.id : get().activeDataset });
+  },
+
+  updateDataset: (ds) => set({ datasets: get().datasets.map((d) => (d.id === ds.id ? ds : d)) }),
+
+  importTables: async (list) => {
+    for (const file of list) {
+      try {
+        const text = decodeTextBytes(new Uint8Array(await file.arrayBuffer()));
+        const err = get().importTableText(text, file.name.replace(/\.(csv|tsv|tab|txt)$/i, ""));
+        if (err) get().toast(`${file.name}: ${err}`, "error");
+      } catch (e) {
+        get().toast(`${file.name}: ${(e as Error).message}`, "error");
+      }
+    }
+  },
+
+  importTableText: (text, name) => {
+    try {
+      const ds = datasetFromDelimited(text, uniqueName(new Set(get().datasets.map((d) => d.name)), name || "Imported table"));
+      get().addDataset(ds);
+      return undefined;
+    } catch (e) {
+      return (e as Error).message;
+    }
   },
 
   setActiveDataset: (id) => set({ activeDataset: id }),

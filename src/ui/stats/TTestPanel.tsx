@@ -11,7 +11,7 @@ import { GroupChart } from "../charts/GroupChart.tsx";
 import { XYChart } from "../charts/XYChart.tsx";
 import { useViewState } from "../hooks.ts";
 import { Callout, Card, Empty, Field, fmt, fmtBf, MethodNote, NumberField, Segmented, Select } from "../kit.tsx";
-import { BF_THRESHOLDS, BfHeadline, bfTick, DroppedNote, groupingOptions, numberOf, numericValues, PosteriorChart, splitByGroup, variableOptions } from "./common.tsx";
+import { bfAxis, BfHeadline, defaultGrouping, defaultOutcome, DroppedNote, groupingOptions, numberOf, numericValues, PosteriorChart, splitByGroup, variableOptions } from "./common.tsx";
 
 type Design = "one" | "independent" | "paired";
 
@@ -32,11 +32,11 @@ export function TTestPanel({ ds }: { ds: Dataset }) {
   const groupings = groupingOptions(ds);
   const [s, setS] = useViewState<Settings>(`stats.ttest.${ds.id}`, {
     design: groupings.length ? "independent" : "one",
-    variable: numeric[numeric.length - 1]?.value ?? "",
-    group: groupings[0]?.value ?? "",
+    variable: defaultOutcome(ds),
+    group: defaultGrouping(ds),
     levelA: "",
     levelB: "",
-    variable2: numeric[0]?.value ?? "",
+    variable2: defaultOutcome(ds, defaultOutcome(ds)),
     testValue: 0,
     scale: 0.707,
     alternative: "two-sided",
@@ -178,9 +178,8 @@ export function TTestPanel({ ds }: { ds: Dataset }) {
                   height={220}
                   crosshair
                   x={{ type: "linear", label: "prior width (Cauchy scale)" }}
-                  y={{ type: "linear", label, format: bfTick }}
+                  y={bfAxis(result.robust, label)}
                   marks={[
-                    ...BF_THRESHOLDS.map((t) => ({ type: "rule" as const, y: t.y, color: "var(--grid)" })),
                     { type: "rule", y: 0, color: "var(--text-3)" },
                     { type: "line", color: "var(--series-1)", label, points: result.scales.map((r, i) => [r, result.robust[i]!] as [number, number]) },
                     { type: "dot", data: [{ x: s.scale, y: result.logBf, tip: { title: "Your prior", rows: [["width", fmt(s.scale)], [label, fmtBf(result.logBf)]] } }] },
@@ -195,9 +194,8 @@ export function TTestPanel({ ds }: { ds: Dataset }) {
                     crosshair
                     crosshairFormat={(v) => `after ${Math.round(v)} rows`}
                     x={{ type: "linear", label: "number of rows" }}
-                    y={{ type: "linear", label, format: bfTick }}
+                    y={bfAxis(result.seq.map((p) => p.logBf), label)}
                     marks={[
-                      ...BF_THRESHOLDS.map((t) => ({ type: "rule" as const, y: t.y, color: "var(--grid)" })),
                       { type: "rule", y: 0, color: "var(--text-3)" },
                       { type: "line", color: "var(--series-1)", label, points: result.seq.map((p) => [p.n, p.logBf] as [number, number]) },
                     ]}

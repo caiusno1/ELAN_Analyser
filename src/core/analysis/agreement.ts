@@ -255,7 +255,7 @@ export function analyseAgreement(files: CorpusFile[], scheme: TierScheme, opts: 
       { name: "tier_1", type: "string" }, { name: "tier_2", type: "string" },
       { name: "n_1", type: "number" }, { name: "n_2", type: "number" },
       { name: "linked", type: "number", label: "annotations both raters made" },
-      { name: "label_agreement", type: "number", label: "share of linked annotations with the same value" },
+      { name: "label_agreement", primary: true, type: "number", label: "share of linked annotations with the same value" },
       { name: "linked_share", type: "number", label: "2·linked / (n_1 + n_2)" },
     ],
   );

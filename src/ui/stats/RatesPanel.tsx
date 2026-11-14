@@ -7,7 +7,7 @@ import { ChartCard } from "../charts/ChartCard.tsx";
 import { XYChart } from "../charts/XYChart.tsx";
 import { useViewState } from "../hooks.ts";
 import { Callout, Card, Empty, Field, fmt, fmtBf, MethodNote, NumberField, pct, Segmented, Select } from "../kit.tsx";
-import { BfHeadline, groupingOptions, numberOf, PosteriorChart, textOf, variableOptions } from "./common.tsx";
+import { BfHeadline, defaultGrouping, groupingOptions, numberOf, PosteriorChart, textOf, variableOptions } from "./common.tsx";
 
 type Mode = "rates" | "proportion" | "distribution";
 
@@ -18,7 +18,7 @@ export function RatesPanel({ ds }: { ds: Dataset }) {
       <div className="stack">
         <Card title="Counts, proportions and rates">
           <Field label="Question">
-            <Segmented value={mode} onChange={setMode} options={[{ value: "rates", label: "Compare rates" }, { value: "proportion", label: "One proportion" }, { value: "distribution", label: "Distribution" }]} />
+            <Segmented value={mode} onChange={setMode} options={[{ value: "rates", label: "Rates" }, { value: "proportion", label: "Proportion" }, { value: "distribution", label: "Distribution" }]} />
           </Field>
           {mode === "rates" && <RatesSettings ds={ds} />}
           {mode === "proportion" && <ProportionSettings ds={ds} />}
@@ -26,11 +26,11 @@ export function RatesPanel({ ds }: { ds: Dataset }) {
         </Card>
         <MethodNote refs={["Jeffreys (1961) Theory of Probability", "Kass & Vaidyanathan (1992) J R Stat Soc B 54", "Wagenmakers et al. (2018) Psychon Bull Rev 25"]}>
           <p>
-            <strong>Compare rates</strong>: events per unit of exposure (for example gestures per minute) in two groups. Given the total number of events, the split between the groups is binomial; the test puts a normal prior on the
+            <strong>Rates</strong>: events per unit of exposure (for example gestures per minute) in two groups. Given the total number of events, the split between the groups is binomial; the test puts a normal prior on the
             log of the rate ratio. With more than two groups, the counts are tested against the shares expected from the exposures.
           </p>
           <p>
-            <strong>One proportion</strong>: H₀: the proportion equals the test value, H₁: it follows a Beta prior. <strong>Distribution</strong>: are the categories of a variable equally frequent, or as frequent as expected?
+            <strong>Proportion</strong>: H₀: the proportion equals the test value, H₁: it follows a Beta prior. <strong>Distribution</strong>: are the categories of a variable equally frequent, or as frequent as expected?
           </p>
           <p>These tests pool the counts and treat events as independent. If events cluster within speakers, compare one rate per speaker with a t-test, or fit a Poisson multilevel model.</p>
         </MethodNote>
@@ -49,8 +49,8 @@ export function RatesPanel({ ds }: { ds: Dataset }) {
 function useRatesSettings(ds: Dataset) {
   const numeric = variableOptions(ds, "number");
   const count = useViewState(`stats.rates.count.${ds.id}`, numeric.find((o) => /^(n|count|events|instances)$/i.test(o.value))?.value ?? numeric[0]?.value ?? "");
-  const exposure = useViewState(`stats.rates.exp.${ds.id}`, numeric.find((o) => /min|dur|exposure|observed|tokens/i.test(o.value))?.value ?? "");
-  const group = useViewState(`stats.rates.group.${ds.id}`, groupingOptions(ds)[0]?.value ?? "");
+  const exposure = useViewState(`stats.rates.exp.${ds.id}`, (numeric.find((o) => /^(observed_min|duration_min|exposure|tokens)$/i.test(o.value)) ?? numeric.find((o) => /(_min|exposure|observed)$/i.test(o.value)))?.value ?? "");
+  const group = useViewState(`stats.rates.group.${ds.id}`, defaultGrouping(ds));
   const sd = useViewState(`stats.rates.sd.${ds.id}`, 1);
   return { count, exposure, group, sd };
 }

@@ -30,6 +30,10 @@ export interface Dataset {
   description: string;
   columns: Column[];
   rowCount: number;
+  /** True for tables the user brought in from a file; they do not depend on the corpus. */
+  imported?: boolean;
+  /** The main measure of the table, preselected as the outcome in the statistics lab. */
+  primary?: string;
 }
 
 export type Cell = number | string;
@@ -43,7 +47,7 @@ export function datasetFromRows(
   unit: string,
   description: string,
   rows: Row[],
-  spec: { name: string; type?: ColumnType; label?: string }[],
+  spec: { name: string; type?: ColumnType; label?: string; primary?: boolean }[],
 ): Dataset {
   const columns: Column[] = spec.map((s) => {
     const type: ColumnType = s.type ?? (rows.some((r) => typeof r[s.name] === "string") ? "string" : "number");
@@ -65,7 +69,10 @@ export function datasetFromRows(
     if (s.label) col.label = s.label;
     return col;
   });
-  return { id: `ds${++datasetCounter}`, name, unit, description, columns, rowCount: rows.length };
+  const ds: Dataset = { id: `ds${++datasetCounter}`, name, unit, description, columns, rowCount: rows.length };
+  const primary = spec.find((s) => s.primary)?.name;
+  if (primary) ds.primary = primary;
+  return ds;
 }
 
 export function column(ds: Dataset, name: string): Column | undefined {
@@ -116,7 +123,14 @@ export interface Aggregation {
 }
 
 /** Group rows by the given string columns and aggregate numeric ones. */
-export function aggregateDataset(ds: Dataset, by: string[], aggs: Aggregation[], name: string, unit: string): Dataset {
+export function aggregateDataset(
+  ds: Dataset,
+  by: string[],
+  aggs: Aggregation[],
+  name: string,
+  unit: string,
+  opts: { keepConstant?: boolean } = {},
+): Dataset {
   const keys = by.map((b) => stringColumn(ds, b));
   const groups = new Map<string, number[]>();
   for (let i = 0; i < ds.rowCount; i++) {
@@ -127,9 +141,22 @@ export function aggregateDataset(ds: Dataset, by: string[], aggs: Aggregation[],
   }
   const rows: Row[] = [];
   const sources = aggs.map((a) => (a.fn === "count" ? undefined : numberColumn(ds, a.column)));
+  // Variables with a single value inside every group (e.g. the condition of a recording) can be carried over.
+  const taken = new Set([...by, ...aggs.map((a) => a.as ?? `${a.fn}_${a.column}`)]);
+  const constant = opts.keepConstant
+    ? ds.columns.filter((c) => {
+        if (taken.has(c.name) || aggs.some((a) => a.fn !== "count" && a.column === c.name)) return false;
+        for (const idx of groups.values()) {
+          const first = c.values[idx[0]!]!;
+          for (const i of idx) if (!Object.is(c.values[i]!, first)) return false;
+        }
+        return true;
+      })
+    : [];
   for (const [key, idx] of groups) {
     const row: Row = {};
     key.split("\u0001").forEach((v, j) => (row[by[j]!] = v));
+    for (const c of constant) row[c.name] = c.values[idx[0]!]!;
     aggs.forEach((a, ai) => {
       const outName = a.as ?? `${a.fn}_${a.column}`;
       if (a.fn === "count") {
@@ -143,9 +170,13 @@ export function aggregateDataset(ds: Dataset, by: string[], aggs: Aggregation[],
   }
   const spec = [
     ...by.map((b) => ({ name: b, type: "string" as const })),
+    ...constant.map((c) => ({ name: c.name, type: c.type, ...(c.label ? { label: c.label } : {}) })),
     ...aggs.map((a) => ({ name: a.as ?? `${a.fn}_${a.column}`, type: "number" as const })),
   ];
-  return datasetFromRows(name, unit, `Aggregated from “${ds.name}” by ${by.join(", ")}.`, rows, spec);
+  const out = datasetFromRows(name, unit, `Aggregated from “${ds.name}” by ${by.join(", ")}.`, rows, spec);
+  const main = aggs.find((a) => a.fn !== "count" && a.column === ds.primary);
+  if (main) out.primary = main.as ?? `${main.fn}_${main.column}`;
+  return out;
 }
 
 function reduce(vals: number[], fn: Aggregation["fn"]): number {
@@ -198,17 +229,22 @@ export function datasetToCsv(ds: Dataset, sep = ","): string {
   return lines.join("\n") + "\n";
 }
 
-/** Parse delimited text (comma, semicolon or tab; quotes per RFC 4180). */
-export function parseDelimited(text: string): string[][] {
-  const firstLine = text.split(/\r?\n/, 1)[0] ?? "";
+/** The separator of delimited text: whichever of comma, semicolon and tab splits the header row most often. */
+export function detectDelimiter(text: string): string {
+  const firstLine = text.replace(/^\uFEFF/, "").split(/\r?\n/, 1)[0] ?? "";
   const counts: [string, number][] = [",", ";", "\t"].map((d) => [d, firstLine.split(d).length]);
   counts.sort((a, b) => b[1] - a[1]);
-  const sep = counts[0]![0];
+  return counts[0]![0];
+}
+
+/** Parse delimited text (comma, semicolon or tab; quotes per RFC 4180). */
+export function parseDelimited(text: string): string[][] {
+  const sep = detectDelimiter(text);
   const rows: string[][] = [];
   let row: string[] = [];
   let cur = "";
   let inQuotes = false;
-  const src = text.replace(/^﻿/, "");
+  const src = text.replace(/^\uFEFF/, "");
   for (let i = 0; i < src.length; i++) {
     const ch = src[i]!;
     if (inQuotes) {
@@ -235,4 +271,69 @@ export function parseDelimited(text: string): string[][] {
     rows.push(row);
   }
   return rows;
+}
+
+const MISSING = new Set(["", "na", "nan", "n/a", "null", "."]);
+
+/**
+ * Turn delimited text with a header row into a dataset. A column is numeric if every
+ * non-empty cell is a number; decimal commas are understood in files that are not
+ * comma-separated.
+ */
+export function datasetFromDelimited(text: string, name: string): Dataset {
+  const table = parseDelimited(text);
+  if (table.length < 2) throw new Error("The table needs a header row and at least one row of data.");
+  const decimalComma = detectDelimiter(text) !== ",";
+  const seen = new Map<string, number>();
+  const names = table[0]!.map((h, i) => {
+    const base = h.trim() || `V${i + 1}`;
+    const k = seen.get(base) ?? 0;
+    seen.set(base, k + 1);
+    return k === 0 ? base : `${base}_${k + 1}`;
+  });
+  const body = table.slice(1);
+  const parse = (cell: string): number => {
+    if (MISSING.has(cell.toLowerCase())) return NaN;
+    const c = decimalComma && /^[-+]?\d*,\d+(e[-+]?\d+)?$/i.test(cell) ? cell.replace(",", ".") : cell;
+    return /^[-+]?(\d+\.?\d*|\.\d+)(e[-+]?\d+)?$/i.test(c) ? Number(c) : Infinity;
+  };
+  const columns: Column[] = names.map((colName, j) => {
+    const cells = body.map((r) => (r[j] ?? "").trim());
+    const numbers = Float64Array.from(cells, parse);
+    let filled = 0;
+    let numeric = true;
+    for (const v of numbers) {
+      if (v === Infinity) numeric = false;
+      else if (!Number.isNaN(v)) filled++;
+    }
+    if (numeric && filled > 0) return { name: colName, type: "number", values: numbers };
+    return { name: colName, type: "string", values: cells.map((c) => (MISSING.has(c.toLowerCase()) ? "" : c)) };
+  });
+  return { id: `ds${++datasetCounter}`, name, unit: "one row of the imported table", description: "Imported table.", columns, rowCount: body.length, imported: true };
+}
+
+/** Decode the bytes of a text file: UTF-8 or UTF-16 (with or without byte-order mark), otherwise Windows-1252. */
+export function decodeTextBytes(bytes: Uint8Array): string {
+  if (bytes.length >= 2 && bytes[0] === 0xff && bytes[1] === 0xfe) return new TextDecoder("utf-16le").decode(bytes);
+  if (bytes.length >= 2 && bytes[0] === 0xfe && bytes[1] === 0xff) return new TextDecoder("utf-16be").decode(bytes);
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch {
+    return new TextDecoder("windows-1252").decode(bytes);
+  }
+}
+
+/** The dataset with one more variable (a variable of the same name is replaced). The identity of the dataset is kept. */
+export function withColumn(ds: Dataset, col: Column): Dataset {
+  if (col.values.length !== ds.rowCount) throw new Error("The new variable must have one value per row.");
+  const at = ds.columns.findIndex((c) => c.name === col.name);
+  const columns = at < 0 ? [...ds.columns, col] : ds.columns.map((c, i) => (i === at ? col : c));
+  return { ...ds, columns };
+}
+
+/** A variable name that is not yet used in the dataset. */
+export function freeColumnName(ds: Dataset, base: string): string {
+  const names = new Set(ds.columns.map((c) => c.name));
+  if (!names.has(base)) return base;
+  for (let k = 2; ; k++) if (!names.has(`${base}_${k}`)) return `${base}_${k}`;
 }

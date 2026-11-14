@@ -5,12 +5,12 @@ import { ChartCard } from "../charts/ChartCard.tsx";
 import { Heatmap } from "../charts/Heatmap.tsx";
 import { useViewState } from "../hooks.ts";
 import { Callout, Card, Empty, Field, fmt, MethodNote, NumberField, pct, Select } from "../kit.tsx";
-import { BfHeadline, DroppedNote, groupingOptions, numberOf, textOf, variableOptions } from "./common.tsx";
+import { BfHeadline, defaultGrouping, DroppedNote, groupingOptions, numberOf, textOf, variableOptions } from "./common.tsx";
 
 export function ContingencyPanel({ ds }: { ds: Dataset }) {
   const cats = groupingOptions(ds);
-  const [rowVar, setRowVar] = useViewState(`stats.ct.row.${ds.id}`, cats[0]?.value ?? "");
-  const [colVar, setColVar] = useViewState(`stats.ct.col.${ds.id}`, cats[1]?.value ?? "");
+  const [rowVar, setRowVar] = useViewState(`stats.ct.row.${ds.id}`, defaultGrouping(ds));
+  const [colVar, setColVar] = useViewState(`stats.ct.col.${ds.id}`, cats.find((c) => c.value !== defaultGrouping(ds) && c.value === defaultGrouping(ds, "several"))?.value ?? cats.find((c) => c.value !== defaultGrouping(ds))?.value ?? "");
   const [countVar, setCountVar] = useViewState(`stats.ct.count.${ds.id}`, "");
   const [scheme, setScheme] = useViewState<SamplingScheme>(`stats.ct.scheme.${ds.id}`, "independentRows");
   const [a, setA] = useViewState(`stats.ct.a.${ds.id}`, 1);

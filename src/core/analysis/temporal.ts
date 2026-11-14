@@ -372,7 +372,7 @@ export function analyseTemporal(files: CorpusFile[], scheme: TierScheme, opts: T
       { name: "mean_interval_s", type: "number", label: "mean time between onsets" },
       { name: "cv_interval", type: "number", label: "coefficient of variation of the intervals (1 = Poisson)" },
       { name: "burstiness", type: "number", label: "B of Goh & Barabási (−1 regular … 0 random … 1 bursty)" },
-      { name: "burstiness_corrected", type: "number", label: "B corrected for the number of events (Kim & Jo)" },
+      { name: "burstiness_corrected", primary: true, type: "number", label: "B corrected for the number of events (Kim & Jo)" },
       { name: "memory", type: "number", label: "correlation of consecutive intervals" },
       { name: "allan_slope", type: "number", label: "exponent of the Allan factor curve (0 = no clustering)" },
       { name: "change_log_bf", type: "number", label: "ln BF for one change in rate vs. constant rate" },

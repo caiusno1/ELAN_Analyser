@@ -5,7 +5,7 @@ import { ChartCard } from "../charts/ChartCard.tsx";
 import { GroupChart } from "../charts/GroupChart.tsx";
 import { useViewState } from "../hooks.ts";
 import { Callout, Card, DataTable, Empty, Field, fmt, fmtBf, MethodNote, Select } from "../kit.tsx";
-import { BfHeadline, DroppedNote, groupingOptions, splitByGroup, variableOptions } from "./common.tsx";
+import { BfHeadline, defaultGrouping, defaultOutcome, DroppedNote, groupingOptions, splitByGroup, variableOptions } from "./common.tsx";
 
 const SCALES = [
   { value: "0.5", label: "medium (0.5)" },
@@ -16,8 +16,8 @@ const SCALES = [
 export function AnovaPanel({ ds }: { ds: Dataset }) {
   const numeric = variableOptions(ds, "number");
   const groupings = groupingOptions(ds);
-  const [variable, setVariable] = useViewState(`stats.anova.var.${ds.id}`, numeric[numeric.length - 1]?.value ?? "");
-  const [group, setGroup] = useViewState(`stats.anova.group.${ds.id}`, groupings[0]?.value ?? "");
+  const [variable, setVariable] = useViewState(`stats.anova.var.${ds.id}`, defaultOutcome(ds));
+  const [group, setGroup] = useViewState(`stats.anova.group.${ds.id}`, defaultGrouping(ds, "several"));
   const [scale, setScale] = useViewState(`stats.anova.scale.${ds.id}`, "0.5");
 
   const res = useMemo(() => {

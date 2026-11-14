@@ -303,7 +303,7 @@ export function analyseRecurrence(files: CorpusFile[], scheme: TierScheme, opts:
       { name: "x_participant", type: "string" }, { name: "y_participant", type: "string" },
       { name: "n_x", type: "number" }, { name: "n_y", type: "number" },
       { name: "recurrence_rate", type: "number" }, { name: "chance_rate", type: "number", label: "recurrence expected from the value frequencies alone" },
-      { name: "log_ratio", type: "number", label: "ln(recurrence rate / chance rate)" },
+      { name: "log_ratio", primary: true, type: "number", label: "ln(recurrence rate / chance rate)" },
       { name: "determinism", type: "number", label: "share of recurrent points on diagonal lines" },
       { name: "mean_line", type: "number" }, { name: "max_line", type: "number" }, { name: "line_entropy", type: "number" },
       { name: "peak_lag", type: "number", label: "lag of maximal recurrence (positive: X leads)" },

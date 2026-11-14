@@ -12,7 +12,7 @@ import { fmt } from "../kit.tsx";
 export type Tip = string | { title?: string; rows?: [string, string][] };
 
 export type AxisSpec =
-  | { type: "linear"; domain?: [number, number]; zero?: boolean; nice?: boolean; label?: string; format?: (v: number) => string; ticks?: number; grid?: boolean }
+  | { type: "linear"; domain?: [number, number]; zero?: boolean; nice?: boolean; label?: string; format?: (v: number) => string; ticks?: number; /** Explicit tick positions (instead of automatic ones). */ tickValues?: number[]; grid?: boolean }
   | { type: "log"; domain?: [number, number]; label?: string; format?: (v: number) => string; grid?: boolean }
   | { type: "band"; domain: string[]; label?: string; padding?: number };
 
@@ -252,8 +252,13 @@ export function XYChart({ x, y, marks, height = 260, legend, crosshair, crosshai
     else setTip({ tip: t, x: e.clientX, y: e.clientY });
   }, []);
 
-  const xTicks = isBand(xs) ? [] : x.type === "log" ? logTicks(xs.domain() as [number, number], Math.floor(pw / 60)) : xs.ticks(Math.max(2, Math.min(10, Math.floor(pw / 78))));
-  const yTicks = isBand(ys) ? [] : y.type === "log" ? logTicks(ys.domain() as [number, number], Math.floor(ph / 26)) : ys.ticks(Math.max(2, Math.min(8, Math.floor(ph / 38))));
+  const fixed = (spec: AxisSpec, scale: AnyScale): number[] | undefined => {
+    if (spec.type !== "linear" || !spec.tickValues || isBand(scale)) return undefined;
+    const [a, b] = scale.domain() as [number, number];
+    return spec.tickValues.filter((v) => v >= Math.min(a, b) - 1e-9 && v <= Math.max(a, b) + 1e-9);
+  };
+  const xTicks = isBand(xs) ? [] : fixed(x, xs) ?? (x.type === "log" ? logTicks(xs.domain() as [number, number], Math.floor(pw / 60)) : xs.ticks(Math.max(2, Math.min(10, Math.floor(pw / 78)))));
+  const yTicks = isBand(ys) ? [] : fixed(y, ys) ?? (y.type === "log" ? logTicks(ys.domain() as [number, number], Math.floor(ph / 26)) : ys.ticks(Math.max(2, Math.min(8, Math.floor(ph / 38)))));
   const xFmt = x.type !== "band" && x.format ? x.format : (v: number) => (isBand(xs) ? String(v) : xs.tickFormat(8)(v));
   const yFmt = y.type !== "band" && y.format ? y.format : (v: number) => (isBand(ys) ? String(v) : ys.tickFormat(6)(v));
   const lines = marks.filter((m): m is Extract<Mark, { type: "line" }> => m.type === "line" && !!m.label);
