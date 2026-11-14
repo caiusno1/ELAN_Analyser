@@ -150,7 +150,7 @@ export function App() {
           <BrandMark />
           <div>
             <div className="brand-name">ELAN Analyser</div>
-            <div className="brand-sub">annotation statistics workbench</div>
+            <div className="brand-sub">analysis workbench</div>
           </div>
         </div>
         <nav className="nav" aria-label="Views">

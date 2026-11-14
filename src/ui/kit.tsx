@@ -288,7 +288,8 @@ export function LayerSelect({ id, value, onChange, kinds, allowNone }: { id?: st
 /** Pick a default layer: the first one of the wanted kind, preferring one whose name matches. */
 export function defaultLayer(layers: LayerInfo[], kind: LayerInfo["kind"] | undefined, prefer?: RegExp, exclude?: string): string {
   const pool = layers.filter((l) => (!kind || l.kind === kind) && l.name !== exclude);
-  const hit = prefer ? pool.find((l) => prefer.test(l.name)) : undefined;
+  // Among matching names the shortest wins ("gesture" before "gesture_phase").
+  const hit = prefer ? pool.filter((l) => prefer.test(l.name)).sort((a, b) => a.name.length - b.name.length)[0] : undefined;
   return (hit ?? pool[0] ?? layers.find((l) => l.name !== exclude) ?? layers[0])?.name ?? "";
 }
 

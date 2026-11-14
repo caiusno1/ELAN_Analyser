@@ -102,11 +102,11 @@ export function tokenizeAnnotation(a: Annotation, opts: TokenizerOptions, drop =
 
 /** Small function-word lists for a few languages; users can paste their own. */
 export const STOP_WORDS: Record<string, string[]> = {
-  English: "a an the and or but if so of to in on at by for with from as is are was were be been being am do does did have has had i you he she it we they me him her us them my your his its our their this that these those there here not no yes n't 's 're 'm 've 'll can could will would shall should may might must just very also then than too what which who whom whose when where why how all any some one".split(" "),
-  German: "der die das den dem des ein eine einen einem einer eines und oder aber wenn so von zu in im an am auf bei für mit aus als ist sind war waren sein bin bist hat haben hatte hatten ich du er sie es wir ihr mich mir dich dir ihn ihm uns euch mein dein nicht kein keine ja nein auch noch nur schon dann da hier dort was wer wie wo warum wann dass ob man sich um nach vor über unter durch zum zur ne nen mal halt eben doch denn".split(" "),
-  Dutch: "de het een en of maar als dus van te in op aan bij voor met uit is zijn was waren ben bent heeft hebben had hadden ik jij je hij zij ze wij we jullie mij me jou hem haar ons hun mijn jouw niet geen ja nee ook nog al dan daar hier wat wie hoe waar waarom wanneer dat die dit deze er om naar over onder door zo wel toch even".split(" "),
-  French: "le la les un une des et ou mais si donc de du à au aux en dans sur par pour avec sans est sont était étaient être suis es a ont avait avaient je tu il elle on nous vous ils elles me te se moi toi lui leur mon ton son ma ta sa mes tes ses ne pas non oui aussi encore déjà puis là ici que qui quoi comment où pourquoi quand ce cet cette ces y ça c' d' l' j' n' qu' s'".split(" "),
-  Spanish: "el la los las un una unos unas y o pero si de del a al en con por para sin es son era eran ser soy eres ha han había yo tú él ella nosotros vosotros ellos ellas me te se lo le nos les mi tu su mis tus sus no sí también ya entonces aquí allí que quien qué cómo dónde cuándo este esta estos estas ese esa eso muy más".split(" "),
+  English: "a an the and or but if so of to in on at by for with from as is are was were be been being am do does did have has had i you he she it we they me him her us them my your his its our their this that these those there here not no yes n't 's 're 'm 've 'll can could will would shall should may might must just very also then than too what which who whom whose when where why how all any some one yeah okay ok mhm uh-huh hm hmm oh ah uh um well".split(" "),
+  German: "der die das den dem des ein eine einen einem einer eines und oder aber wenn so von zu in im an am auf bei für mit aus als ist sind war waren sein bin bist hat haben hatte hatten ich du er sie es wir ihr mich mir dich dir ihn ihm uns euch mein dein nicht kein keine ja nein auch noch nur schon dann da hier dort was wer wie wo warum wann dass ob man sich um nach vor über unter durch zum zur ne nen mal halt eben doch denn okay ok mhm hm hmm äh ähm ach oh".split(" "),
+  Dutch: "de het een en of maar als dus van te in op aan bij voor met uit is zijn was waren ben bent heeft hebben had hadden ik jij je hij zij ze wij we jullie mij me jou hem haar ons hun mijn jouw niet geen ja nee ook nog al dan daar hier wat wie hoe waar waarom wanneer dat die dit deze er om naar over onder door zo wel toch even oké ok okay mhm hm uh eh".split(" "),
+  French: "le la les un une des et ou mais si donc de du à au aux en dans sur par pour avec sans est sont était étaient être suis es a ont avait avaient je tu il elle on nous vous ils elles me te se moi toi lui leur mon ton son ma ta sa mes tes ses ne pas non oui aussi encore déjà puis là ici que qui quoi comment où pourquoi quand ce cet cette ces y ça c' d' l' j' n' qu' s' ouais ok okay hm euh ben bah".split(" "),
+  Spanish: "el la los las un una unos unas y o pero si de del a al en con por para sin es son era eran ser soy eres ha han había yo tú él ella nosotros vosotros ellos ellas me te se lo le nos les mi tu su mis tus sus no sí también ya entonces aquí allí que quien qué cómo dónde cuándo este esta estos estas ese esa eso muy más vale ok okay eh mm pues bueno".split(" "),
 };
 
 /** The `k` most frequent token types — a language-independent proxy for function words. */
@@ -117,4 +117,21 @@ export function topFrequentTypes(tokens: Iterable<string>, k: number): string[] 
     .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
     .slice(0, k)
     .map((e) => e[0]);
+}
+
+/**
+ * Guess which stop-word list fits a sample of tokens: the language whose function words
+ * cover the largest share of the tokens, if that share is substantial.
+ */
+export function guessStopLanguage(tokens: Iterable<string>): string | undefined {
+  const sets = Object.entries(STOP_WORDS).map(([lang, words]) => ({ lang, set: new Set(words), hits: 0 }));
+  let n = 0;
+  for (const t of tokens) {
+    n++;
+    for (const s of sets) if (s.set.has(t)) s.hits++;
+    if (n >= 20000) break;
+  }
+  if (n < 20) return undefined;
+  sets.sort((a, b) => b.hits - a.hits);
+  return sets[0]!.hits / n >= 0.25 ? sets[0]!.lang : undefined;
 }
