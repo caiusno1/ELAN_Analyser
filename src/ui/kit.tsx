@@ -65,6 +65,23 @@ export function downloadText(fileName: string, text: string, mime = "text/plain"
   }
 }
 
+/** Offer binary data (e.g. a ZIP archive) as a file download; returns false if the browser refuses. */
+export function downloadBytes(fileName: string, bytes: Uint8Array, mime = "application/octet-stream"): boolean {
+  try {
+    const url = URL.createObjectURL(new Blob([bytes as Uint8Array<ArrayBuffer>], { type: mime }));
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export async function copyText(text: string): Promise<boolean> {
   try {
     await navigator.clipboard.writeText(text);

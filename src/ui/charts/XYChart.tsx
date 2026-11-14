@@ -231,6 +231,11 @@ export function XYChart({ x, y, marks, height = 260, legend, crosshair, crosshai
     // Left margin from the widest y tick label.
     let left = 44;
     if (y.type === "band") left = Math.min(180, 14 + Math.max(...y.domain.map((d) => truncate(d, 26).length), 3) * 6.3);
+    // Explicit ticks often carry names or long labels rather than short numbers.
+    else if (y.type === "linear" && y.tickValues?.length) {
+      const fmtTick = y.format ?? String;
+      left = Math.max(44, Math.min(190, 14 + Math.max(...y.tickValues.map((v) => truncate(fmtTick(v), 28).length), 3) * 6.3));
+    }
     if (y.label) left += 16;
     const bandX = x.type === "band" ? x.domain : undefined;
     const slot = bandX ? (w - left - 12) / Math.max(bandX.length, 1) : Infinity;
@@ -428,7 +433,7 @@ export function XYChart({ x, y, marks, height = 260, legend, crosshair, crosshai
         <svg ref={svgRef} width={w} height={height} role="img" aria-label={ariaLabel}>
           <g transform={`translate(${left},${top})`}>
             {/* grid and axes */}
-            {yTicks.map((t) => (
+            {!(y.type === "linear" && y.grid === false) && yTicks.map((t) => (
               <line key={`gy${t}`} className="gridline" x1={0} x2={pw} y1={(ys as ScaleContinuousNumeric<number, number>)(t)} y2={(ys as ScaleContinuousNumeric<number, number>)(t)} />
             ))}
             {x.type !== "band" && x.grid && xTicks.map((t) => (
@@ -437,7 +442,7 @@ export function XYChart({ x, y, marks, height = 260, legend, crosshair, crosshai
             <line className="baseline" x1={0} x2={pw} y1={ph} y2={ph} />
             <g className="axis">
               {yTicks.map((t) => (
-                <text key={`ty${t}`} x={-8} y={(ys as ScaleContinuousNumeric<number, number>)(t)} dy="0.32em" textAnchor="end">{yFmt(t)}</text>
+                <text key={`ty${t}`} x={-8} y={(ys as ScaleContinuousNumeric<number, number>)(t)} dy="0.32em" textAnchor="end">{yFmt(t).length > 28 ? <><title>{yFmt(t)}</title>{truncate(yFmt(t), 28)}</> : yFmt(t)}</text>
               ))}
               {isBand(ys) && ys.domain().map((d) => (
                 <text key={`by${d}`} x={-8} y={(ys(d) ?? 0) + ys.bandwidth() / 2} dy="0.32em" textAnchor="end"><title>{d}</title>{truncate(d, 26)}</text>

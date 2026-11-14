@@ -476,7 +476,9 @@ button.link {
 }
 .field + .field,
 .field-row + .field,
-.field + .field-row {
+.field + .field-row,
+.row + .field,
+.segmented + .field {
   margin-top: 9px;
 }
 .field > label,
