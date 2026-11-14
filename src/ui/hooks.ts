@@ -88,3 +88,23 @@ export function useDebounced<T>(value: T, delay = 250): T {
   }, [value, delay]);
   return v;
 }
+
+/** Distinct (normalised) values of a layer, most frequent first; capped for use in pickers. */
+export function useLayerValues(layer: string, limit = 300): string[] {
+  const files = useStore((s) => s.files);
+  const scheme = useStore((s) => s.scheme);
+  return useMemo(() => {
+    if (!layer) return [];
+    const counts = new Map<string, number>();
+    for (const f of files) {
+      for (const t of f.doc.tiers) {
+        if ((scheme[t.id]?.layer ?? t.id) !== layer) continue;
+        for (const a of t.annotations) {
+          const v = a.value.trim().replace(/\s+/g, " ");
+          if (counts.size < 5000 || counts.has(v)) counts.set(v, (counts.get(v) ?? 0) + 1);
+        }
+      }
+    }
+    return [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, limit).map((e) => e[0]);
+  }, [files, scheme, layer, limit]);
+}
