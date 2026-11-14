@@ -130,10 +130,12 @@ export function analyseRecurrence(files: CorpusFile[], scheme: TierScheme, opts:
   const fy = compileFilter(opts.filterY);
   const xs = layerTiers(files, scheme, opts.layerX);
   const ys = layerTiers(files, scheme, opts.layerY);
-  // With the same layer on both axes, "other" pairs each ordered pair of participants once per direction.
-  const tierPairs = opts.layerX === opts.layerY && opts.pairing === "same"
+  // With the same layer on both axes each pair of tiers is analysed once (A as X, B as Y),
+  // so that the sign of a lag keeps its meaning; "same" means each tier with itself.
+  const sameLayer = opts.layerX === opts.layerY;
+  const tierPairs = sameLayer && opts.pairing === "same"
     ? xs.map((_, i) => [i, i] as [number, number])
-    : pairTiers(xs, ys, opts.pairing);
+    : pairTiers(xs, ys, opts.pairing).filter(([i, j]) => !sameLayer || xs[i]!.tier.id.localeCompare(ys[j]!.tier.id, undefined, { numeric: true }) < 0);
   const metaVars = listMetaVariables(files);
   const W = opts.maxLag;
   const pairs: RecurrencePair[] = [];

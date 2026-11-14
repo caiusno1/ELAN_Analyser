@@ -185,6 +185,22 @@ function barPath(x: number, y: number, w: number, h: number, horizontal: boolean
     : `M${x},${y}h${w - r}a${r},${r} 0 0 1 ${r},${r}v${h - 2 * r}a${r},${r} 0 0 1 ${-r},${r}h${-(w - r)}z`;
 }
 
+/** Ticks for a log axis: 1-2-5 steps per decade, thinned to whole decades when space is short. */
+function logTicks([lo, hi]: [number, number], maxCount: number): number[] {
+  const a = Math.min(lo, hi);
+  const b = Math.max(lo, hi);
+  const out: number[] = [];
+  for (let e = Math.floor(Math.log10(a)); e <= Math.ceil(Math.log10(b)); e++) {
+    for (const m of [1, 2, 5]) {
+      const v = m * Math.pow(10, e);
+      if (v >= a * 0.9999 && v <= b * 1.0001) out.push(Number(v.toPrecision(12)));
+    }
+  }
+  if (out.length <= Math.max(3, maxCount)) return out;
+  const decades = out.filter((v) => Math.abs(Math.log10(v) - Math.round(Math.log10(v))) < 1e-9);
+  return decades.length >= 2 ? decades : out.filter((_, i) => i % 2 === 0);
+}
+
 function truncate(s: string, n: number): string {
   return s.length > n ? `${s.slice(0, n - 1)}…` : s;
 }
@@ -236,8 +252,8 @@ export function XYChart({ x, y, marks, height = 260, legend, crosshair, crosshai
     else setTip({ tip: t, x: e.clientX, y: e.clientY });
   }, []);
 
-  const xTicks = isBand(xs) ? [] : xs.ticks(Math.max(2, Math.min(10, Math.floor(pw / 78))));
-  const yTicks = isBand(ys) ? [] : ys.ticks(Math.max(2, Math.min(8, Math.floor(ph / 38))));
+  const xTicks = isBand(xs) ? [] : x.type === "log" ? logTicks(xs.domain() as [number, number], Math.floor(pw / 60)) : xs.ticks(Math.max(2, Math.min(10, Math.floor(pw / 78))));
+  const yTicks = isBand(ys) ? [] : y.type === "log" ? logTicks(ys.domain() as [number, number], Math.floor(ph / 26)) : ys.ticks(Math.max(2, Math.min(8, Math.floor(ph / 38))));
   const xFmt = x.type !== "band" && x.format ? x.format : (v: number) => (isBand(xs) ? String(v) : xs.tickFormat(8)(v));
   const yFmt = y.type !== "band" && y.format ? y.format : (v: number) => (isBand(ys) ? String(v) : ys.tickFormat(6)(v));
   const lines = marks.filter((m): m is Extract<Mark, { type: "line" }> => m.type === "line" && !!m.label);

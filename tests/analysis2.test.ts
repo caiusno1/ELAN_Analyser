@@ -209,8 +209,8 @@ describe("recurrence", () => {
     expect(ab.maxLine).toBe(4);
     expect(ab.det).toBe(1);
     expect(ab.asymmetry).toBeGreaterThan(0);
-    const ba = res.pairs.find((p) => p.xLabel === "B" && p.yLabel === "A")!;
-    expect(ba.peakLag).toBe(-2);
+    // Each pair of tiers is analysed once, with the first tier as X.
+    expect(res.pairs).toHaveLength(1);
     expect(res.meanProfile).toHaveLength(7);
     expect(ab.expectedRr).toBeCloseTo(4 / 36, 12);
   });
@@ -226,9 +226,9 @@ describe("recurrence", () => {
     expect(ab.peakLag).toBe(2);
     const { files: demo, scheme: ds } = demoCorpus();
     const words = analyseRecurrence(demo.slice(0, 2), ds, { ...DEFAULT_RECURRENCE, layerX: "speech", layerY: "speech", tokenizer: DEFAULT_TOKENIZER, maxLag: 30 });
-    expect(words.pairs).toHaveLength(4);
+    expect(words.pairs).toHaveLength(2);
     expect(words.pairs[0]!.rr).toBeGreaterThan(0);
-    expect(words.dataset.rowCount).toBe(4);
+    expect(words.dataset.rowCount).toBe(2);
   });
 });
 
