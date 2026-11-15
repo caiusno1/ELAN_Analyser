@@ -198,6 +198,11 @@ h3 {
 a {
   color: var(--accent);
 }
+.prose {
+  max-width: 78ch;
+  line-height: 1.5;
+  overflow-wrap: break-word;
+}
 button.link {
   display: inline;
   padding: 0;

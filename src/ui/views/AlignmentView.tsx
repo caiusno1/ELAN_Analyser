@@ -250,9 +250,10 @@ function LexiconPanel({ result }: { result: AlignmentResult }) {
   }, [result]);
   return (
     <div>
-      <p className="muted" style={{ padding: "10px 14px 4px" }}>
-        Every expression that one speaker took over from another. Click a row to mark the expression in the transcript.
-      </p>
+      <div className="row" style={{ padding: "10px 14px 4px" }}>
+        <p className="muted" style={{ margin: 0, flex: "1 1 320px" }}>Every expression that one speaker took over from another. Click a row to mark the expression in the transcript.</p>
+        <SendToStats dataset={result.instanceDataset} label="Every re-use in Statistics" />
+      </div>
       <DataTable<LexRow>
         rows={rows}
         csvName="shared_expressions"

@@ -30,7 +30,7 @@ export function RatesPanel({ ds }: { ds: Dataset }) {
             log of the rate ratio. With more than two groups, the counts are tested against the shares expected from the exposures.
           </p>
           <p>
-            <strong>Proportion</strong>: H₀: the proportion equals the test value, H₁: it follows a Beta prior. <strong>Distribution</strong>: are the categories of a variable equally frequent, or as frequent as expected?
+            <strong>Proportion</strong>: H₀: the proportion equals the test value, H₁: it follows a Beta prior. <strong>Distribution</strong>: are the categories of a variable equally frequent?
           </p>
           <p>These tests pool the counts and treat events as independent. If events cluster within speakers, compare one rate per speaker with a t-test, or fit a Poisson multilevel model.</p>
         </MethodNote>
