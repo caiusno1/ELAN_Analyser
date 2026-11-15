@@ -1,10 +1,10 @@
 import { useRef, useState } from "react";
-import { DEFAULT_ALIGNMENT, analyseAlignment } from "../../core/analysis/alignment.ts";
+import { analyseAlignment } from "../../core/analysis/alignment.ts";
 import { ALL_VALUES } from "../../core/analysis/common.ts";
 import { describeLayer } from "../../core/analysis/descriptives.ts";
 import { DEFAULT_TURN_TAKING, analyseTurnTaking } from "../../core/analysis/turntaking.ts";
 import type { Dataset } from "../../core/data/dataset.ts";
-import { DEFAULT_TEXT_SETTINGS, useTokenizer } from "../alignmentOptions.tsx";
+import { useAlignmentOptions, useAlignmentSettings } from "../alignmentOptions.tsx";
 import { useLayers, useViewState } from "../hooks.ts";
 import { Button, Callout, Card, defaultLayer, Field, LayerSelect, Select, Tabs } from "../kit.tsx";
 import { AnovaPanel } from "../stats/AnovaPanel.tsx";
@@ -81,7 +81,9 @@ function NewTable({ first, onDone }: { first?: boolean; onDone?: () => void }) {
   const layers = useLayers();
   const [layer, setLayer] = useViewState("stats.new.layer", defaultLayer(layers, "categorical", /gest/i));
   const info = layers.find((l) => l.name === layer);
-  const { tokenizer } = useTokenizer(info?.kind === "text" ? layer : "", DEFAULT_TEXT_SETTINGS);
+  // The same settings as on the Lexical alignment page, so that the table agrees with what is shown there.
+  const [alignSettings] = useAlignmentSettings();
+  const { options: alignOptions } = useAlignmentOptions({ ...alignSettings, layer: info?.kind === "text" ? layer : "" });
   const [pasted, setPasted] = useState("");
   const [error, setError] = useState<string | undefined>();
   const input = useRef<HTMLInputElement | null>(null);
@@ -123,9 +125,9 @@ function NewTable({ first, onDone }: { first?: boolean; onDone?: () => void }) {
               />
               <QuickRow
                 title="Lexical alignment per speaker"
-                text="One row per speaker and recording: share of tokens taken up from the partner."
+                text="One row per speaker and recording: share of tokens taken up from the partner (with the settings of the Lexical alignment page)."
                 disabled={!several || info?.kind !== "text"}
-                onClick={() => open(analyseAlignment(files, scheme, { layer, tokenizer, ...DEFAULT_ALIGNMENT }).dataset, "No dialogue with two speakers was found in this layer.")}
+                onClick={() => open(analyseAlignment(files, scheme, alignOptions).dataset, "No dialogue with two speakers was found in this layer.")}
               />
             </div>
             <p className="faint" style={{ margin: "10px 0 0" }}>

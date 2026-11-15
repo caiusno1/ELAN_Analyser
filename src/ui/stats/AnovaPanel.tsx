@@ -5,7 +5,7 @@ import { ChartCard } from "../charts/ChartCard.tsx";
 import { GroupChart } from "../charts/GroupChart.tsx";
 import { useViewState } from "../hooks.ts";
 import { Callout, Card, DataTable, Empty, Field, fmt, fmtBf, MethodNote, Select } from "../kit.tsx";
-import { BfHeadline, defaultGrouping, defaultOutcome, DroppedNote, groupingOptions, splitByGroup, variableOptions } from "./common.tsx";
+import { BfHeadline, defaultGrouping, defaultOutcome, DroppedNote, groupingOptions, NestingNote, splitByGroup, variableOptions } from "./common.tsx";
 
 const SCALES = [
   { value: "0.5", label: "medium (0.5)" },
@@ -54,6 +54,7 @@ export function AnovaPanel({ ds }: { ds: Dataset }) {
         </MethodNote>
       </div>
       <div className="stack">
+        <NestingNote ds={ds} />
         {!res ? <Empty title="Choose a variable and a grouping variable" /> : "error" in res ? <Callout kind="warning">{res.error}</Callout> : (
           <>
             <Card title={`${variable} by ${group}`} sub={`F(${res.stats.dfBetween}, ${res.stats.dfWithin}) = ${fmt(res.stats.f, 3)}, η² = ${fmt(res.stats.r2, 3)}`}>

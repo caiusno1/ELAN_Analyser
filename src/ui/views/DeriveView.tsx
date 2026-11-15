@@ -1,12 +1,11 @@
 import { useMemo, useState } from "react";
-import { DEFAULT_ALIGNMENT } from "../../core/analysis/alignment.ts";
 import { ALL_VALUES, formatDuration, formatTime, type ValueFilter } from "../../core/analysis/common.ts";
 import type { Pairing } from "../../core/analysis/cooccurrence.ts";
 import { addDerivedLayer, derive, DERIVE_LABEL, removeDerivedLayer, splitByLayer, type DeriveOp } from "../../core/analysis/tieralgebra.ts";
 import { layerTiers, roleOf } from "../../core/corpus/corpus.ts";
 import { derivedTiersToEaf } from "../../core/eaf/export.ts";
 import { zipStore } from "../../core/zip.ts";
-import { DEFAULT_TEXT_SETTINGS, useTokenizer } from "../alignmentOptions.tsx";
+import { DEFAULT_TEXT_SETTINGS, useAlignmentOptions, useAlignmentSettings, useTokenizer } from "../alignmentOptions.tsx";
 import { ChartCard } from "../charts/ChartCard.tsx";
 import { XYChart, type Mark } from "../charts/XYChart.tsx";
 import { useLayerValues, useLayers, useViewState } from "../hooks.ts";
@@ -104,7 +103,10 @@ export function DeriveView() {
   const layerY = layers.some((l) => l.name === s.layerY) ? s.layerY : "";
   const values = useLayerValues(mainLayer);
   const valuesY = useLayerValues(layerY);
-  const { tokenizer } = useTokenizer(s.kind === "tokens" || s.kind === "alignment" ? mainLayer : "", DEFAULT_TEXT_SETTINGS);
+  const { tokenizer } = useTokenizer(s.kind === "tokens" ? mainLayer : "", DEFAULT_TEXT_SETTINGS);
+  // Alignment instances are computed with the settings of the Lexical alignment page, so that the tier holds what that page counts.
+  const [alignSettings] = useAlignmentSettings();
+  const { options: alignOptions } = useAlignmentOptions({ ...alignSettings, layer: s.kind === "alignment" ? mainLayer : "" });
 
   const op = useMemo<DeriveOp | undefined>(() => {
     if (s.kind === "union") return s.layers.length >= 1 ? { kind: "union", layers: s.layers, label: s.text || "active" } : undefined;
@@ -121,9 +123,9 @@ export function DeriveView() {
       case "tokens": return { kind: "tokens", layer: mainLayer, tokenizer };
       case "window": return { kind: "window", layer: mainLayer, anchor: s.anchor, before: s.before, after: s.after };
       case "floor": return { kind: "floor", options: { layer: mainLayer, minPause: s.minPause, minDuration: 0 } };
-      case "alignment": return { kind: "alignment", options: { layer: mainLayer, tokenizer, ...DEFAULT_ALIGNMENT } };
+      case "alignment": return { kind: "alignment", options: alignOptions };
     }
-  }, [s, mainLayer, layerY, tokenizer]);
+  }, [s, mainLayer, layerY, tokenizer, alignOptions]);
 
   const result = useMemo(() => (op && tab === "new" ? derive(files, scheme, op) : undefined), [files, scheme, op, tab]);
 
@@ -333,7 +335,7 @@ export function DeriveView() {
                   <NumberField id="dv-pause" value={s.minPause} min={0} step={20} onChange={(minPause) => patch({ minPause })} />
                 </Field>
               )}
-              {s.kind === "alignment" && <p className="faint" style={{ margin: "9px 0 0" }}>Uses the default settings of the alignment page: turns as units, single content words and longer expressions, the whole preceding dialogue.</p>}
+              {s.kind === "alignment" && <p className="faint" style={{ margin: "9px 0 0" }}>Uses the settings of the Lexical alignment page (unit, shortest expression, look-back, function words), so the tier holds exactly the instances counted there.</p>}
             </Card>
 
             <Card title="Add to the corpus">

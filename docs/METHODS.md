@@ -459,7 +459,7 @@ Convergence: R̂ at most 1.01 for every parameter (rank-normalised, split chains
 
 Fit: the posterior predictive check overlays the observed outcome with data simulated from the fitted model. If the simulated distributions do not look like the data, change the kind of outcome before interpreting coefficients.
 
-Unit of analysis: the simple tests assume independent rows. Aggregate to one row per speaker or recording first (Data › Aggregate), or use the multilevel model.
+Unit of analysis: the simple tests assume independent rows, and say so when the rows of a table come from few recordings. Many annotations from twelve recordings are not many observations: aggregate to one row per speaker or recording first (Data › Aggregate), or use the multilevel model.
 
 Small number of groups: with a handful of recordings the between-recording variation is poorly determined and the prior matters. Report it, and prefer wide intervals to confident claims.
 

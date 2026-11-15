@@ -11,7 +11,7 @@ import { GroupChart } from "../charts/GroupChart.tsx";
 import { XYChart } from "../charts/XYChart.tsx";
 import { useViewState } from "../hooks.ts";
 import { Callout, Card, Empty, Field, fmt, fmtBf, MethodNote, NumberField, Segmented, Select } from "../kit.tsx";
-import { bfAxis, BfHeadline, defaultGrouping, defaultOutcome, DroppedNote, groupingOptions, numberOf, numericValues, PosteriorChart, splitByGroup, variableOptions } from "./common.tsx";
+import { bfAxis, BfHeadline, defaultGrouping, defaultOutcome, DroppedNote, groupingOptions, NestingNote, numberOf, numericValues, PosteriorChart, splitByGroup, variableOptions } from "./common.tsx";
 
 type Design = "one" | "independent" | "paired";
 
@@ -137,6 +137,7 @@ export function TTestPanel({ ds }: { ds: Dataset }) {
         </MethodNote>
       </div>
       <div className="stack">
+        <NestingNote ds={ds} />
         {!data ? (
           <Empty title="Choose a variable" />
         ) : "error" in data ? (

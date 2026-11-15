@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { analyseAlignment, DEFAULT_ALIGNMENT, type AlignInstance } from "../../core/analysis/alignment.ts";
+import { analyseAlignment, type AlignInstance } from "../../core/analysis/alignment.ts";
 import { formatDuration, formatTime } from "../../core/analysis/common.ts";
 import { pairTiers } from "../../core/analysis/cooccurrence.ts";
 import { analyseTurnTaking, DEFAULT_TURN_TAKING, FLOOR_LABEL, type FloorSegment } from "../../core/analysis/turntaking.ts";
 import { layerTiers, roleOf } from "../../core/corpus/corpus.ts";
 import type { Annotation, Tier } from "../../core/eaf/model.ts";
 import { forEachOverlap, lowerBoundStart } from "../../core/intervals.ts";
-import { DEFAULT_TOKENIZER } from "../../core/text/tokenize.ts";
+import { useAlignmentOptions, useAlignmentSettings } from "../alignmentOptions.tsx";
 import { useLayers, useParticipantList, useThemeColors, useViewState, useWidth } from "../hooks.ts";
 import { Button, Card, CheckList, defaultLayer, Field, LayerSelect, Segmented, Select, Toggle } from "../kit.tsx";
 import { useStore } from "../store.ts";
@@ -61,7 +61,10 @@ export function TimelineView() {
   const [groupBy, setGroupBy] = useViewState<"participant" | "layer">("timeline.group", "participant");
   const [hidden, setHidden] = useViewState<string[]>("timeline.hidden", []);
   const [showAlign, setShowAlign] = useViewState("timeline.align", false);
-  const [alignLayer, setAlignLayer] = useViewState("timeline.alignLayer", defaultLayer(layers, "text", /speech|utter|trans|text|word/i));
+  // The overlay uses the settings of the Lexical alignment page, so that both count the same instances.
+  const [alignSettings, patchAlign] = useAlignmentSettings();
+  const { options: alignOptions } = useAlignmentOptions(alignSettings);
+  const alignLayer = alignSettings.layer;
   const [showCooc, setShowCooc] = useViewState("timeline.cooc", false);
   const [coocX, setCoocX] = useViewState("timeline.coocX", defaultLayer(layers, "categorical", /gest/i));
   const [coocY, setCoocY] = useViewState("timeline.coocY", defaultLayer(layers, "text", /speech|utter|trans/i));
@@ -121,8 +124,8 @@ export function TimelineView() {
   // ---- overlays ---------------------------------------------------------------------------
   const alignment = useMemo(() => {
     if (!file || !showAlign || !alignLayer) return undefined;
-    return analyseAlignment([file], scheme, { ...DEFAULT_ALIGNMENT, layer: alignLayer, tokenizer: DEFAULT_TOKENIZER }).files[0];
-  }, [file, scheme, showAlign, alignLayer]);
+    return analyseAlignment([file], scheme, alignOptions).files[0];
+  }, [file, scheme, showAlign, alignLayer, alignOptions]);
   const floor = useMemo<FloorSegment[] | undefined>(() => {
     if (!file || !showFloor || !floorLayer) return undefined;
     return analyseTurnTaking([file], scheme, { ...DEFAULT_TURN_TAKING, layer: floorLayer }).files[0]?.segments;
@@ -462,14 +465,14 @@ export function TimelineView() {
         <Card title="Lexical alignment" sub="Mark words re-used from the other speaker.">
           <Toggle id="tl-align" checked={showAlign} onChange={setShowAlign}>Highlight alignment</Toggle>
           <Field label="Transcription layer" htmlFor="tl-align-layer">
-            <LayerSelect id="tl-align-layer" value={alignLayer} onChange={setAlignLayer} kinds={["text"]} />
+            <LayerSelect id="tl-align-layer" value={alignLayer} onChange={(layer) => patchAlign({ layer })} kinds={["text"]} />
           </Field>
           {showAlign && (
             <p className="muted" style={{ marginTop: 8 }}>
               {alignment ? (
                 <>
                   <strong className="num" style={{ color: "var(--text)" }}>{alignCount}</strong> alignment instance{alignCount === 1 ? "" : "s"} in this file (
-                  {alignment.bySpeaker.map((m) => `${m.speaker}: ${m.instances}`).join(", ")}). Hover an utterance to see where its re-used words were said before.
+                  {alignment.bySpeaker.map((m) => `${m.speaker}: ${m.instances}`).join(", ")}), with the settings of the Lexical alignment page. Hover an utterance to see where its re-used words were said before.
                 </>
               ) : (
                 "This layer needs at least two speakers in the file."

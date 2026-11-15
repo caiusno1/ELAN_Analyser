@@ -7,6 +7,7 @@ import {
   decodeTextBytes,
   detectDelimiter,
   filterDataset,
+  nestingOf,
   freeColumnName,
   numberColumn,
   parseDelimited,
@@ -130,5 +131,21 @@ describe("delimited text", () => {
     // "Äußerung" in Windows-1252: not valid UTF-8, so the fallback applies.
     const latin = Uint8Array.from([0xc4, 0x75, 0xdf, 0x65, 0x72, 0x75, 0x6e, 0x67]);
     expect(decodeTextBytes(latin)).toBe("Äußerung");
+  });
+});
+
+describe("nestingOf", () => {
+  it("finds the recording that several rows share", () => {
+    expect(nestingOf(ds)).toEqual({ variable: "file", groups: 2, perGroup: 2.5 });
+    const perFile = aggregateDataset(ds, ["file"], [{ column: "dur", fn: "mean" }], "per file", "one file");
+    expect(nestingOf(perFile)).toBeUndefined();
+    // After splitting recordings into parts, the parts of one recording share their source file.
+    const parts = datasetFromRows("parts", "one part", "", [
+      { file: "a · 1", source_file: "a", y: 1 },
+      { file: "a · 2", source_file: "a", y: 2 },
+      { file: "b · 1", source_file: "b", y: 3 },
+    ], [{ name: "file", type: "string" }, { name: "source_file", type: "string" }, { name: "y" }]);
+    expect(nestingOf(parts)).toEqual({ variable: "source_file", groups: 2, perGroup: 1.5 });
+    expect(nestingOf(datasetFromRows("plain", "row", "", [{ y: 1 }, { y: 2 }], [{ name: "y" }]))).toBeUndefined();
   });
 });

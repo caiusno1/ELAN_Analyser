@@ -7,7 +7,7 @@ import { ChartCard } from "../charts/ChartCard.tsx";
 import { XYChart } from "../charts/XYChart.tsx";
 import { useViewState } from "../hooks.ts";
 import { Callout, Card, Empty, Field, fmt, fmtBf, MethodNote, NumberField, pct, Segmented, Select } from "../kit.tsx";
-import { BfHeadline, defaultGrouping, groupingOptions, numberOf, PosteriorChart, textOf, variableOptions } from "./common.tsx";
+import { BfHeadline, defaultGrouping, groupingOptions, NestingNote, numberOf, PosteriorChart, textOf, variableOptions } from "./common.tsx";
 
 type Mode = "rates" | "proportion" | "distribution";
 
@@ -36,6 +36,7 @@ export function RatesPanel({ ds }: { ds: Dataset }) {
         </MethodNote>
       </div>
       <div className="stack">
+        <NestingNote ds={ds} />
         {mode === "rates" && <RatesResult ds={ds} />}
         {mode === "proportion" && <ProportionResult ds={ds} />}
         {mode === "distribution" && <DistributionResult ds={ds} />}

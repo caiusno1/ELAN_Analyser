@@ -337,3 +337,20 @@ export function freeColumnName(ds: Dataset, base: string): string {
   if (!names.has(base)) return base;
   for (let k = 2; ; k++) if (!names.has(`${base}_${k}`)) return `${base}_${k}`;
 }
+
+/**
+ * Do several rows of the table come from the same recording? Tests that treat rows as
+ * independent observations overstate the evidence for such tables (pseudo-replication).
+ * Returns the variable that names the recording, the number of recordings and the mean
+ * number of rows per recording — or undefined if every recording has one row.
+ */
+export function nestingOf(ds: Dataset): { variable: string; groups: number; perGroup: number } | undefined {
+  for (const name of ["source_file", "file", "dyad"]) {
+    const c = column(ds, name);
+    if (!c || c.type !== "string") continue;
+    const groups = new Set(c.values.filter((v) => v.trim() !== "")).size;
+    if (groups >= 1 && groups < ds.rowCount) return { variable: name, groups, perGroup: ds.rowCount / groups };
+  }
+  return undefined;
+}
+

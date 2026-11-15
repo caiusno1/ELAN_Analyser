@@ -5,7 +5,7 @@ import { ChartCard } from "../charts/ChartCard.tsx";
 import { Heatmap } from "../charts/Heatmap.tsx";
 import { useViewState } from "../hooks.ts";
 import { Callout, Card, Empty, Field, fmt, MethodNote, NumberField, pct, Select } from "../kit.tsx";
-import { BfHeadline, defaultGrouping, DroppedNote, groupingOptions, numberOf, textOf, variableOptions } from "./common.tsx";
+import { BfHeadline, defaultGrouping, DroppedNote, groupingOptions, NestingNote, numberOf, textOf, variableOptions } from "./common.tsx";
 
 export function ContingencyPanel({ ds }: { ds: Dataset }) {
   const cats = groupingOptions(ds);
@@ -74,6 +74,7 @@ export function ContingencyPanel({ ds }: { ds: Dataset }) {
         </MethodNote>
       </div>
       <div className="stack">
+        <NestingNote ds={ds} />
         {!res ? <Empty title="Choose two categorical variables" /> : "error" in res ? <Callout kind="warning">{res.error}</Callout> : (
           <>
             <Card title={`${rowVar} × ${colVar}`} sub={`${res.n.toLocaleString("en-US")} cases in ${res.rows.length} × ${res.cols.length} cells`}>

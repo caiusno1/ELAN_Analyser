@@ -7,7 +7,7 @@ import { ChartCard } from "../charts/ChartCard.tsx";
 import { XYChart } from "../charts/XYChart.tsx";
 import { useViewState } from "../hooks.ts";
 import { Callout, Card, Empty, Field, fmt, fmtBf, MethodNote, NumberField, Segmented, Select } from "../kit.tsx";
-import { BfHeadline, defaultOutcome, DroppedNote, numberOf, PosteriorChart, textOf, variableOptions } from "./common.tsx";
+import { BfHeadline, defaultOutcome, DroppedNote, NestingNote, numberOf, PosteriorChart, textOf, variableOptions } from "./common.tsx";
 
 export function CorrelationPanel({ ds }: { ds: Dataset }) {
   const numeric = variableOptions(ds, "number");
@@ -73,6 +73,7 @@ export function CorrelationPanel({ ds }: { ds: Dataset }) {
         </MethodNote>
       </div>
       <div className="stack">
+        <NestingNote ds={ds} />
         {!res ? <Empty title="Choose two different numeric variables" /> : "error" in res ? <Callout kind="warning">{res.error}</Callout> : (
           <>
             <Card title={`${x} and ${y}`} sub={`r = ${fmt(res.r, 3)}, n = ${res.n}`}>

@@ -1,8 +1,8 @@
 import type { ReactNode } from "react";
-import { column, levelsOf, type Dataset, type NumberColumn } from "../../core/data/dataset.ts";
+import { column, levelsOf, nestingOf, type Dataset, type NumberColumn } from "../../core/data/dataset.ts";
 import { evidenceLabel } from "../../core/stats/bayes/proportions.ts";
 import { XYChart, type AxisSpec, type Mark } from "../charts/XYChart.tsx";
-import { fmtBf } from "../kit.tsx";
+import { Callout, fmtBf } from "../kit.tsx";
 
 /** Variables of a dataset, optionally of one type only. */
 export function variableOptions(ds: Dataset, type?: "number" | "string", none?: string): { value: string; label: string }[] {
@@ -166,6 +166,27 @@ export function PosteriorChart({ x, posterior, prior, ci, xLabel, testValue = 0,
       ariaLabel={`Prior and posterior distribution of ${xLabel}`}
     />
   );
+}
+
+/**
+ * A warning for tests that assume independent rows, shown when the rows of the table are
+ * nested in recordings: many annotations from few recordings are not many observations.
+ */
+export function NestingNote({ ds }: { ds: Dataset }): ReactNode {
+  const nesting = nestingOf(ds);
+  if (!nesting || nesting.perGroup < 1.5) return null;
+  const per = nesting.perGroup >= 10 ? Math.round(nesting.perGroup).toLocaleString("en-US") : fmtNumber(nesting.perGroup);
+  return (
+    <Callout kind="warning">
+      The {ds.rowCount.toLocaleString("en-US")} rows of this table come from {nesting.groups.toLocaleString("en-US")} recording{nesting.groups === 1 ? "" : "s"} (about {per} each). This test treats every row as an independent
+      observation; rows from the same recording usually resemble each other, and the evidence is then overstated — often by orders of magnitude. Aggregate to one row per recording or speaker (Data › Aggregate), or use the multilevel
+      model with “{nesting.variable}” as grouping variable.
+    </Callout>
+  );
+}
+
+function fmtNumber(v: number): string {
+  return String(Number(v.toPrecision(2)));
 }
 
 /** A note about rows that could not be used. */
