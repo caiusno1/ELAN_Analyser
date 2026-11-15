@@ -12,7 +12,8 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
     "test:watch": "vitest",
-    "demo:write": "node --experimental-strip-types scripts/write-demo-corpus.ts"
+    "demo:write": "node --experimental-strip-types --no-warnings scripts/write-demo-corpus.ts",
+    "docs": "node --experimental-strip-types --no-warnings scripts/write-docs.ts"
   },
   "dependencies": {
     "d3-array": "^3.2.5",

@@ -552,3 +552,39 @@ describe("search", () => {
     expect(searchAnnotations(files, scheme, { ...base, pattern: "" }, 2).hits).toHaveLength(2);
   });
 });
+
+describe("kappa posterior with many categories", () => {
+  it("stays fast and sensible for a table with hundreds of values", () => {
+    // 300 values, raters agree on 90% of 3000 units: the dense prior would need 90 000 draws per sample.
+    const K = 300;
+    const table = Array.from({ length: K }, () => new Array<number>(K).fill(0));
+    const rng = new Rng(4);
+    for (let u = 0; u < 3000; u++) {
+      const a = rng.int(K);
+      const b = rng.bernoulli(0.9) ? a : rng.int(K);
+      table[a]![b] = table[a]![b]! + 1;
+    }
+    const t0 = Date.now();
+    const post = kappaPosterior(table);
+    expect(Date.now() - t0).toBeLessThan(4000);
+    expect(post.method).toBe("bootstrap");
+    expect(post.kappa).toBeGreaterThan(0.85);
+    expect(post.kappa).toBeLessThan(0.95);
+    expect(post.ci[0]).toBeLessThan(post.kappa);
+    expect(post.ci[1]).toBeGreaterThan(post.kappa);
+    expect(post.ci[1] - post.ci[0]).toBeLessThan(0.05);
+    expect(post.pAbove08).toBeGreaterThan(0.99);
+  });
+
+  it("uses the proper prior for ordinary coding schemes and handles empty tables", () => {
+    const post = kappaPosterior([[40, 5], [3, 52]]);
+    expect(post.method).toBe("dirichlet");
+    expect(post.kappa).toBeCloseTo(0.838, 2);
+    expect(post.ci[0]).toBeGreaterThan(0.65);
+    expect(post.ci[0]).toBeLessThan(0.8);
+    expect(post.ci[1]).toBeLessThan(0.95);
+    const empty = kappaPosterior([[0, 0], [0, 0]]);
+    expect(Number.isNaN(empty.kappa)).toBe(true);
+    expect(Number.isNaN(empty.median)).toBe(true);
+  });
+});

@@ -36,6 +36,8 @@ export interface KappaPosterior {
   /** Posterior probabilities that κ exceeds common benchmarks. */
   pAbove06: number;
   pAbove08: number;
+  /** "dirichlet": proper prior on every cell; "bootstrap": Bayesian bootstrap over the observed cells (many categories). */
+  method: "dirichlet" | "bootstrap";
 }
 
 export interface AgreementResult {
@@ -84,42 +86,73 @@ function kappaOf(table: number[][]): { kappa: number; observed: number; expected
   return { kappa: pe < 1 ? (po - pe) / (1 - pe) : NaN, observed: po, expected: pe };
 }
 
+/** Up to this many categories the posterior uses a proper prior on every cell of the table. */
+export const DENSE_KAPPA_CATEGORIES = 40;
+
 /**
- * Posterior of Cohen's κ: the cell probabilities of the confusion matrix get a
- * Dirichlet(1/K²·K) prior (one pseudo-observation spread over the table per category),
- * and κ is computed for each posterior draw.
+ * Posterior of Cohen's κ.
+ *
+ * Up to 40 categories, the cell probabilities of the confusion matrix get a
+ * Dirichlet prior with 1/K in every cell (one pseudo-observation per category, spread
+ * over the table), and κ is computed for each posterior draw.
+ *
+ * With more categories (free-text tiers, large tag sets) a table has K² cells, almost all
+ * of them empty, and such a prior would both dominate the data and cost K² draws per
+ * sample. The posterior is then the Bayesian bootstrap: a Dirichlet over the observed
+ * cells only (Rubin 1981), which needs one draw per non-empty cell.
  */
-export function kappaPosterior(table: number[][], draws = 6000, seed = 1): KappaPosterior {
+export function kappaPosterior(table: number[][], draws?: number, seed = 1): KappaPosterior {
   const point = kappaOf(table);
   const k = table.length;
-  const prior = 1 / k;
-  const alpha = table.flat().map((v) => v + prior);
-  const rng = new Rng(seed);
-  const p = new Float64Array(alpha.length);
-  const ks = new Float64Array(draws);
-  for (let d = 0; d < draws; d++) {
-    rng.dirichlet(alpha, p);
-    let po = 0;
-    let pe = 0;
-    for (let i = 0; i < k; i++) {
-      let r = 0;
-      let c = 0;
-      for (let j = 0; j < k; j++) {
-        r += p[i * k + j]!;
-        c += p[j * k + i]!;
-      }
-      po += p[i * k + i]!;
-      pe += r * c;
+  const dense = k <= DENSE_KAPPA_CATEGORIES;
+  const method: KappaPosterior["method"] = dense ? "dirichlet" : "bootstrap";
+  const cellRow: number[] = [];
+  const cellCol: number[] = [];
+  const alpha: number[] = [];
+  for (let i = 0; i < k; i++) {
+    for (let j = 0; j < k; j++) {
+      const v = table[i]![j]!;
+      if (!dense && !(v > 0)) continue;
+      cellRow.push(i);
+      cellCol.push(j);
+      alpha.push(dense ? v + 1 / k : v);
     }
-    ks[d] = (po - pe) / (1 - pe);
   }
+  const m = alpha.length;
+  if (m === 0 || Number.isNaN(point.kappa)) return { ...point, median: NaN, ci: [NaN, NaN], pAbove06: NaN, pAbove08: NaN, method };
+  // Fewer draws for big tables: the cost is draws × cells.
+  const n = draws ?? Math.max(1000, Math.min(6000, Math.round(3e6 / m)));
+  const rng = new Rng(seed);
+  const row = new Float64Array(k);
+  const col = new Float64Array(k);
+  const ks = new Float64Array(n);
+  let kept = 0;
+  for (let d = 0; d < n; d++) {
+    row.fill(0);
+    col.fill(0);
+    let total = 0;
+    let diag = 0;
+    for (let c = 0; c < m; c++) {
+      const g = rng.gamma(alpha[c]!);
+      total += g;
+      row[cellRow[c]!] = row[cellRow[c]!]! + g;
+      col[cellCol[c]!] = col[cellCol[c]!]! + g;
+      if (cellRow[c] === cellCol[c]) diag += g;
+    }
+    if (!(total > 0)) continue;
+    let pe = 0;
+    for (let i = 0; i < k; i++) pe += (row[i]! / total) * (col[i]! / total);
+    if (pe < 1) ks[kept++] = (diag / total - pe) / (1 - pe);
+  }
+  const sample = ks.subarray(0, kept);
+  if (kept === 0) return { ...point, median: NaN, ci: [NaN, NaN], pAbove06: NaN, pAbove08: NaN, method };
   let a6 = 0;
   let a8 = 0;
-  for (let d = 0; d < draws; d++) {
-    if (ks[d]! > 0.6) a6++;
-    if (ks[d]! > 0.8) a8++;
+  for (let d = 0; d < kept; d++) {
+    if (sample[d]! > 0.6) a6++;
+    if (sample[d]! > 0.8) a8++;
   }
-  return { ...point, median: median(ks), ci: eti(ks, 0.95), pAbove06: a6 / draws, pAbove08: a8 / draws };
+  return { ...point, median: median(sample), ci: eti(sample, 0.95), pAbove06: a6 / kept, pAbove08: a8 / kept, method };
 }
 
 export function analyseAgreement(files: CorpusFile[], scheme: TierScheme, opts: AgreementOptions): AgreementResult {
@@ -224,19 +257,15 @@ export function analyseAgreement(files: CorpusFile[], scheme: TierScheme, opts: 
   }
 
   const labelTable = confusion.slice(0, none).map((r) => r.slice(0, none));
+  // One-vs-rest κ for each category over all units, from the margins of the table.
+  const rowSum = confusion.map((r) => r.reduce((t, v) => t + v, 0));
+  const colSum = new Array<number>(K).fill(0);
+  for (const r of confusion) for (let j = 0; j < K; j++) colSum[j] = colSum[j]! + r[j]!;
+  const total = rowSum.reduce((t, v) => t + v, 0);
   const perCategory = cats.map((c, ci) => {
-    // One-vs-rest κ for this category over all units.
-    let both = 0;
-    let n1 = 0;
-    let n2 = 0;
-    let total = 0;
-    for (let i = 0; i < K; i++) for (let j = 0; j < K; j++) {
-      const v = confusion[i]![j]!;
-      total += v;
-      if (i === ci) n1 += v;
-      if (j === ci) n2 += v;
-      if (i === ci && j === ci) both += v;
-    }
+    const both = confusion[ci]![ci]!;
+    const n1 = rowSum[ci]!;
+    const n2 = colSum[ci]!;
     const table = [[both, n1 - both], [n2 - both, total - n1 - n2 + both]];
     return { category: c, n1, n2, both, kappa: kappaOf(table).kappa };
   });

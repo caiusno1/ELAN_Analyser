@@ -8,7 +8,12 @@ export interface Reference {
   text: string;
 }
 
-export const REFERENCES: Reference[] = [
+/** Sort key that does not depend on the locale data of the machine: lower case, without diacritics. */
+function sortKey(text: string): string {
+  return text.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+}
+
+const ENTRIES: Reference[] = [
   { id: "abney2014", text: "Abney, D. H., Paxton, A., Dale, R., & Kello, C. T. (2014). Complexity matching in dyadic conversation. Journal of Experimental Psychology: General, 143(6), 2304–2315." },
   { id: "abney2018", text: "Abney, D. H., Dale, R., Louwerse, M. M., & Kello, C. T. (2018). The bursts and lulls of multimodal interaction: Temporal distributions of behavior reveal differences between verbal and non-verbal communication. Cognitive Science, 42(4), 1297–1316." },
   { id: "alibali2001", text: "Alibali, M. W., Heath, D. C., & Myers, H. J. (2001). Effects of visibility between speaker and listener on gesture production: Some gestures are meant to be seen. Journal of Memory and Language, 44(2), 169–188." },
@@ -85,6 +90,9 @@ export const REFERENCES: Reference[] = [
   { id: "wittenburg2006", text: "Wittenburg, P., Brugman, H., Russel, A., Klassmann, A., & Sloetjes, H. (2006). ELAN: A professional framework for multimodality research. In Proceedings of the 5th International Conference on Language Resources and Evaluation (LREC 2006) (pp. 1556–1559)." },
   { id: "xu2015", text: "Xu, Y., & Reitter, D. (2015). An evaluation and comparison of linguistic alignment measures. In Proceedings of the 6th Workshop on Cognitive Modeling and Computational Linguistics (pp. 58–67)." },
 ];
+
+/** The bibliography in alphabetical order. */
+export const REFERENCES: Reference[] = [...ENTRIES].sort((a, b) => (sortKey(a.text) < sortKey(b.text) ? -1 : sortKey(a.text) > sortKey(b.text) ? 1 : 0));
 
 const BY_ID = new Map(REFERENCES.map((r) => [r.id, r]));
 

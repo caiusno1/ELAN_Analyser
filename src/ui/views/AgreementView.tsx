@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { analyseAgreement, UNLINKED } from "../../core/analysis/agreement.ts";
+import { analyseAgreement, DENSE_KAPPA_CATEGORIES, UNLINKED } from "../../core/analysis/agreement.ts";
 import { formatDuration, formatTime } from "../../core/analysis/common.ts";
 import { ChartCard } from "../charts/ChartCard.tsx";
 import { Heatmap } from "../charts/Heatmap.tsx";
@@ -28,7 +28,8 @@ export function AgreementView() {
       const b = layers.find((l) => l.name !== a.name && l.name.startsWith(a.name) && /r\d|rater|coder|ann|_2|v2/i.test(l.name.slice(a.name.length)));
       if (b) return [a.name, b.name] as const;
     }
-    return [layers[0]?.name ?? "", layers[1]?.name ?? ""] as const;
+    // No such pair: leave the choice to the user rather than compare two unrelated layers.
+    return ["", ""] as const;
   }, [layers]);
   const [layerA, setLayerA] = useViewState("agr.a", guess[0]);
   const [layerB, setLayerB] = useViewState("agr.b", guess[1]);
@@ -68,9 +69,11 @@ export function AgreementView() {
       </div>
     );
   }
-  const none = res.categories.length - 1;
   const total = res.confusion.flat().reduce((a, b) => a + b, 0);
-  const shownMatrix = matrix === "units" ? res.confusion : res.timeConfusion.map((r) => r.map((v) => v / 1000));
+  // A matrix of hundreds of values cannot be read: show the most frequent ones and fold the rest.
+  const folded = foldMatrix(res.categories, matrix === "units" ? res.confusion : res.timeConfusion.map((r) => r.map((v) => v / 1000)), MAX_MATRIX);
+  const shownMatrix = folded.values;
+  const none = folded.labels.length - 1;
 
   return (
     <div className="view-grid">
@@ -86,7 +89,7 @@ export function AgreementView() {
               <Tile label="Time κ" value={fmt(res.timeKappa.kappa, 2)} hint={`same code ${pct(res.timeKappa.observed)} of the time`} />
               <Tile label="Linked units" value={res.linked.toLocaleString("en-US")} hint={`only rater 1: ${res.unlinkedA} · only rater 2: ${res.unlinkedB}`} />
             </div>
-            <Card title="How sure can we be?" sub="Posterior probabilities for the usual benchmarks.">
+            <Card title="How sure can we be?" sub={res.unitKappa.method === "bootstrap" ? `Posterior probabilities for the usual benchmarks. With more than ${DENSE_KAPPA_CATEGORIES} values the intervals come from a Bayesian bootstrap over the observed units.` : "Posterior probabilities for the usual benchmarks."}>
               <div className="table-wrap">
                 <table className="data">
                   <thead><tr><th>Measure</th><th className="n">κ</th><th className="n">Agreement</th><th className="n">By chance</th><th className="n">Posterior median</th><th className="n">95% CrI</th><th className="n">P(κ &gt; 0.6)</th><th className="n">P(κ &gt; 0.8)</th></tr></thead>
@@ -104,13 +107,13 @@ export function AgreementView() {
             <div className="cols-2">
               <ChartCard
                 title="Who coded what"
-                sub={matrix === "units" ? `Rows: ${layerA}. Columns: ${layerB}. ${total} units.` : "Seconds both raters assigned to each pair of codes."}
+                sub={`${matrix === "units" ? `Rows: ${layerA}. Columns: ${layerB}. ${total} units.` : "Seconds both raters assigned to each pair of codes."}${folded.others ? ` The ${MAX_MATRIX} most frequent values are shown; ${folded.others} more are combined.` : ""}`}
                 actions={<Segmented value={matrix} onChange={setMatrix} options={[{ value: "units", label: "Units" }, { value: "time", label: "Time" }]} />}
-                table={{ columns: [layerA, ...res.categories], rows: res.categories.map((c, i) => [c, ...shownMatrix[i]!]) }}
+                table={{ columns: [layerA, ...folded.labels], rows: folded.labels.map((c, i) => [c, ...shownMatrix[i]!]) }}
               >
                 <Heatmap
-                  rows={res.categories}
-                  cols={res.categories}
+                  rows={folded.labels}
+                  cols={folded.labels}
                   values={shownMatrix.map((r, i) => r.map((v, j) => (matrix === "units" && i === none && j === none ? NaN : v)))}
                   mode="sequential"
                   rowLabel="rater 1"
@@ -120,7 +123,7 @@ export function AgreementView() {
                     const v = shownMatrix[r]![c]!;
                     return matrix === "units" ? (r === none && c === none ? "" : String(v)) : v >= 100 ? v.toFixed(0) : v.toFixed(1);
                   }}
-                  tip={(r, c) => ({ title: `${res.categories[r]} / ${res.categories[c]}`, rows: [[matrix === "units" ? "units" : "time", matrix === "units" ? String(res.confusion[r]![c]!) : formatDuration(res.timeConfusion[r]![c]!)]] })}
+                  tip={(r, c) => ({ title: `${folded.labels[r]} / ${folded.labels[c]}`, rows: [[matrix === "units" ? "units" : "time", matrix === "units" ? String(shownMatrix[r]![c]!) : formatDuration(shownMatrix[r]![c]! * 1000)]] })}
                   ariaLabel="Confusion matrix of the two raters"
                 />
               </ChartCard>
@@ -170,4 +173,20 @@ export function AgreementView() {
       </div>
     </div>
   );
+}
+
+const MAX_MATRIX = 24;
+
+/**
+ * The confusion matrix restricted to the `keep` most frequent values (the values come sorted
+ * by frequency); all others are summed into one row and column. The last entry, "no
+ * annotation", stays last.
+ */
+function foldMatrix(categories: string[], values: number[][], keep: number): { labels: string[]; values: number[][]; others: number } {
+  const last = categories.length - 1;
+  if (last <= keep) return { labels: categories, values, others: 0 };
+  const at = (i: number) => (i === last ? keep + 1 : i < keep ? i : keep);
+  const out = Array.from({ length: keep + 2 }, () => new Array<number>(keep + 2).fill(0));
+  for (let i = 0; i <= last; i++) for (let j = 0; j <= last; j++) out[at(i)]![at(j)]! += values[i]![j]!;
+  return { labels: [...categories.slice(0, keep), "(other values)", categories[last]!], values: out, others: last - keep };
 }
