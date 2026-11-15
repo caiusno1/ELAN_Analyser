@@ -1,11 +1,14 @@
 import { useMemo } from "react";
+import { ALL_VALUES, type ValueFilter } from "../../core/analysis/common.ts";
+import { linkLayer, type LinkOptions } from "../../core/analysis/link.ts";
+import { listParticipants } from "../../core/corpus/corpus.ts";
 import { aggregateDataset, column, filterDataset, freeColumnName, levelsOf, withColumn, type Aggregation, type Column, type Dataset } from "../../core/data/dataset.ts";
 import { mean, ranks, sd, summarize } from "../../core/stats/describe.ts";
 import { ChartCard } from "../charts/ChartCard.tsx";
 import { Histogram } from "../charts/Histogram.tsx";
 import { XYChart } from "../charts/XYChart.tsx";
-import { useViewState } from "../hooks.ts";
-import { Button, Callout, Card, CheckList, DataTable, DatasetCsvButton, Field, fmt, NumberField, pct, Segmented, Select, TextField, Toggle, type ColumnDef } from "../kit.tsx";
+import { useLayerValues, useLayers, useViewState } from "../hooks.ts";
+import { Button, Callout, Card, CheckList, DataTable, DatasetCsvButton, defaultLayer, Field, FilterField, fmt, LayerSelect, NumberField, pct, Segmented, Select, TextField, Toggle, type ColumnDef } from "../kit.tsx";
 import { useStore } from "../store.ts";
 import { groupingOptions, numberOf, splitByGroup, textOf, variableOptions } from "./common.tsx";
 
@@ -42,7 +45,7 @@ function describeColumn(c: Column): VarRow {
   return { name: c.name, type: "text", valid: c.values.length - missing, missing, distinct: counts.size, mean: NaN, sd: NaN, min: NaN, median: NaN, max: NaN, note: c.label ? `${c.label} — ${note}` : note };
 }
 
-type Tool = "aggregate" | "filter" | "compute";
+type Tool = "aggregate" | "filter" | "compute" | "link";
 
 const FUNCTIONS: { value: Aggregation["fn"]; label: string }[] = [
   { value: "mean", label: "mean" },
@@ -144,7 +147,7 @@ export function DataPanel({ ds }: { ds: Dataset }) {
           </div>
         </Card>
         <Card title="Reshape" sub="Each tool makes a new table; the original stays as it is.">
-          <Segmented<Tool> value={tool} onChange={setTool} options={[{ value: "aggregate", label: "Aggregate" }, { value: "filter", label: "Filter" }, { value: "compute", label: "Compute" }]} />
+          <Segmented<Tool> value={tool} onChange={setTool} options={[{ value: "aggregate", label: "Aggregate" }, { value: "filter", label: "Filter" }, { value: "compute", label: "Compute" }, { value: "link", label: "Link" }]} />
           {tool === "aggregate" && <AggregateTool ds={ds} onResult={(d) => addDataset(d)} />}
           {tool === "filter" && <FilterTool ds={ds} onResult={(d) => addDataset(d)} />}
           {tool === "compute" && (
@@ -154,6 +157,16 @@ export function DataPanel({ ds }: { ds: Dataset }) {
                 updateDataset(withColumn(ds, col));
                 setSelected(col.name);
                 toast(`Variable “${col.name}” added.`);
+              }}
+            />
+          )}
+          {tool === "link" && (
+            <LinkTool
+              ds={ds}
+              onResult={(col) => {
+                updateDataset(withColumn(ds, col));
+                setSelected(col.name);
+                toast(`Variable “${col.name}” added from the corpus.`);
               }}
             />
           )}
@@ -168,6 +181,10 @@ export function DataPanel({ ds }: { ds: Dataset }) {
             <p>
               The <strong>multilevel model</strong> is the alternative: it works on the single annotations and takes the nesting into account through grouping variables. When speakers carry the same label in every file (A, B), join file
               and participant into one variable with <strong>Compute</strong> first.
+            </p>
+            <p>
+              <strong>Link</strong> looks up what was annotated on any layer at the time of each row — for example the gaze of the previous speaker at every change of speaker — and adds it as a variable. That turns questions across
+              modalities into an ordinary comparison or regression.
             </p>
           </div>
         </details>
@@ -385,6 +402,89 @@ function ComputeTool({ ds, onResult }: { ds: Dataset; onResult: (col: Column) =>
           disabled={!va || (info.binary && (!vb || va === vb)) || !finalName}
           onClick={() => {
             onResult(compute(ds, op, va, vb, finalName));
+            setName("");
+          }}
+        >
+          Add variable
+        </Button>
+      </div>
+    </>
+  );
+}
+
+/** Add a variable that says what was annotated on a layer at the time of each row. */
+function LinkTool({ ds, onResult }: { ds: Dataset; onResult: (col: Column) => void }) {
+  const files = useStore((st) => st.files);
+  const scheme = useStore((st) => st.scheme);
+  const layers = useLayers();
+  const numeric = variableOptions(ds, "number");
+  // The variable that names the recording: the one whose values are file names of the corpus.
+  const fileNames = useMemo(() => new Set(files.map((f) => f.name)), [files]);
+  const fileColumn = useMemo(() => ds.columns.find((c) => c.type === "string" && c.values.slice(0, 200).some((v) => fileNames.has(v.trim())))?.name ?? "", [ds, fileNames]);
+  // Variables that name a participant of the corpus.
+  const people = useMemo(() => {
+    const known = new Set(listParticipants(files, scheme));
+    return ds.columns.filter((c) => c.type === "string" && c.name !== fileColumn && c.values.length > 0 && c.values.slice(0, 200).every((v) => v.trim() === "" || known.has(v.trim()))).map((c) => c.name);
+  }, [ds, files, scheme, fileColumn]);
+  const timeDefault = (numeric.find((o) => /^(time|start|reference_time)(_s)?$/i.test(o.value)) ?? numeric.find((o) => /time|start/i.test(o.value)) ?? numeric[0])?.value ?? "";
+
+  const [layer, setLayer] = useViewState(`stats.link.layer.${ds.id}`, defaultLayer(layers, "categorical", /gaze|gest/i));
+  const [filter, setFilter] = useViewState<ValueFilter>(`stats.link.filter.${ds.id}`, ALL_VALUES);
+  const [time, setTime] = useViewState(`stats.link.time.${ds.id}`, timeDefault);
+  const [who, setWho] = useViewState(`stats.link.who.${ds.id}`, people[0] ? `same:${people[0]}` : "any");
+  const [before, setBefore] = useViewState(`stats.link.before.${ds.id}`, 0);
+  const [after, setAfter] = useViewState(`stats.link.after.${ds.id}`, 0);
+  const [output, setOutput] = useViewState<LinkOptions["output"]>(`stats.link.output.${ds.id}`, "value");
+  const [name, setName] = useViewState(`stats.link.name.${ds.id}`, "");
+  const values = useLayerValues(layer);
+
+  const whoOptions = [{ value: "any", label: "any tier of the layer" }, ...people.flatMap((p) => [{ value: `same:${p}`, label: `the participant in “${p}”` }, { value: `other:${p}`, label: `the partner of “${p}”` }])];
+  const whoValue = whoOptions.some((o) => o.value === who) ? who : "any";
+  const timeColumn = numeric.some((o) => o.value === time) ? time : timeDefault;
+  const usable = files.length > 0 && fileColumn !== "" && timeColumn !== "" && layers.some((l) => l.name === layer);
+  const suggested = freeColumnName(ds, (output === "present" ? `has_${layer}` : `${layer}_at_${timeColumn.replace(/_s$/, "")}`).replace(/[^\p{L}\p{N}_]+/gu, "_"));
+  const finalName = name.trim() || suggested;
+
+  const result = useMemo(() => {
+    if (!usable) return undefined;
+    const opts: LinkOptions = { layer, filter, fileColumn, timeColumn, participant: whoValue === "any" ? "any" : (whoValue.slice(0, whoValue.indexOf(":")) as "same" | "other"), before, after, output };
+    if (whoValue !== "any") opts.participantColumn = whoValue.slice(whoValue.indexOf(":") + 1);
+    return linkLayer(ds, files, scheme, opts, finalName);
+  }, [usable, ds, files, scheme, layer, filter, fileColumn, timeColumn, whoValue, before, after, output, finalName]);
+
+  if (files.length === 0 || fileColumn === "" || numeric.length === 0) {
+    return <div style={{ marginTop: 10 }}><Callout kind="info">Linking needs a table that names its recording and a time in seconds — for example single annotations, changes of speaker, alignment instances or search results of the corpus that is loaded.</Callout></div>;
+  }
+  return (
+    <>
+      <Field label="Layer to look up" htmlFor="lnk-layer"><LayerSelect id="lnk-layer" value={layer} onChange={(v) => { setLayer(v); setFilter(ALL_VALUES); }} /></Field>
+      <FilterField id="lnk-filter" label="Values that count" value={filter} onChange={setFilter} values={values} />
+      <Field label="Time of the row (s)" htmlFor="lnk-time" hint={`Recordings are matched by the variable “${fileColumn}”.`}><Select id="lnk-time" value={timeColumn} onChange={setTime} options={numeric} /></Field>
+      <Field label="Whose tier" htmlFor="lnk-who"><Select id="lnk-who" value={whoValue} onChange={setWho} options={whoOptions} /></Field>
+      <div className="field-row" style={{ marginTop: 9 }}>
+        <Field label="From (ms before)" htmlFor="lnk-before"><NumberField id="lnk-before" value={before} min={0} step={100} onChange={setBefore} /></Field>
+        <Field label="to (ms after)" htmlFor="lnk-after"><NumberField id="lnk-after" value={after} min={0} step={100} onChange={setAfter} /></Field>
+      </div>
+      <p className="faint" style={{ margin: "4px 0 9px" }}>{before || after ? "The annotation that fills most of this window is taken." : "0 and 0: the annotation at exactly that moment."}</p>
+      <Field label="New variable holds">
+        <Segmented value={output} onChange={setOutput} options={[{ value: "value", label: "the value" }, { value: "present", label: "yes / no" }]} />
+      </Field>
+      <Field label="Name" htmlFor="lnk-name" error={result?.error}>
+        <TextField id="lnk-name" value={name} onChange={setName} placeholder={suggested} mono />
+      </Field>
+      {result && (
+        <p className="faint" style={{ margin: "8px 0 0" }}>
+          {result.matched.toLocaleString("en-US")} of {ds.rowCount.toLocaleString("en-US")} rows have an annotation there{output === "value" ? "; the others get “(none)”" : ""}.
+          {result.unlinked > 0 && ` ${result.unlinked.toLocaleString("en-US")} rows belong to no recording of the corpus or have no time and stay empty.`}
+        </p>
+      )}
+      <div className="row" style={{ marginTop: 10 }}>
+        <Button
+          kind="primary"
+          disabled={!result || !!result.error || !finalName}
+          onClick={() => {
+            if (!result) return;
+            onResult(result.column);
             setName("");
           }}
         >
