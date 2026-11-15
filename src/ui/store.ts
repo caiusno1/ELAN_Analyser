@@ -108,16 +108,25 @@ export const useStore = create<AppState>()((set, get) => ({
       // Let the browser paint between files.
       await new Promise((r) => setTimeout(r, 0));
     }
-    const base = get().isDemo ? [] : get().files;
+    // Nothing could be read: keep whatever is loaded (including the example corpus).
+    if (added.length === 0) {
+      set({ busy: undefined });
+      return;
+    }
+    const wasDemo = get().isDemo;
+    const base = wasDemo ? [] : get().files;
     const variables = [...new Set(base.flatMap((f) => Object.keys(f.meta)))];
     for (const f of added) for (const v of variables) f.meta[v] = "";
     const files = [...base, ...added];
     set({
       files,
-      scheme: inferScheme(files, get().isDemo ? undefined : get().scheme),
+      scheme: inferScheme(files, wasDemo ? undefined : get().scheme),
       busy: undefined,
       isDemo: false,
-      datasets: get().isDemo ? get().datasets.filter((d) => d.imported) : get().datasets,
+      datasets: wasDemo ? get().datasets.filter((d) => d.imported) : get().datasets,
+      // Settings made while exploring the example corpus name its layers; start afresh with the user's files.
+      viewState: wasDemo ? {} : get().viewState,
+      focus: wasDemo ? undefined : get().focus,
     });
     if (added.length) {
       const warnings = added.reduce((s, f) => s + f.doc.warnings.length, 0);
