@@ -454,11 +454,25 @@ describe("tier algebra", () => {
     expect(other.tiers[0]!.annotations).toEqual([{ start: 2800, end: 3000, value: "beat" }]);
     const not = derive(files, scheme, { kind: "exclude", layerX: "gesture", layerY: "speech", pairing: "same" });
     expect(not.tiers[0]!.annotations).toEqual([{ start: 5000, end: 5200, value: "beat" }]);
+    // "with" is the other half: whole annotations of X that overlap Y, not just the overlapping stretch.
+    const withY = derive(files, scheme, { kind: "with", layerX: "gesture", layerY: "speech", pairing: "same" });
+    expect(withY.tiers[0]!.annotations).toEqual([{ start: 0, end: 1000, value: "iconic" }, { start: 2000, end: 3000, value: "beat" }]);
+    const utterancesWithBeat = derive(files, scheme, { kind: "with", layerX: "speech", layerY: "gesture", pairing: "same", filterY: { mode: "values", values: ["beat"] } });
+    expect(utterancesWithBeat.tiers.find((t) => t.participant === "A")!.annotations.map((a) => a.value)).toEqual(["the red one", "yes"]);
+    // B has no gesture tier: whether B's utterances came with a gesture is unknown, so B gets no tier.
+    expect(utterancesWithBeat.tiers.find((t) => t.participant === "B")).toBeUndefined();
   });
 
   it("merges, complements, chains, tokenises and windows", () => {
     const union = derive(files, scheme, { kind: "union", layers: ["gesture", "speech"], label: "active" });
     expect(union.tiers.find((t) => t.participant === "A")!.annotations.map((a) => [a.start, a.end])).toEqual([[0, 3000], [5000, 5200], [6000, 7000]]);
+    // Pooling keeps every annotation and its value, in time order, on one tier per participant.
+    const pool = derive(files, scheme, { kind: "pool", layers: ["gesture", "speech"], prefix: true });
+    expect(pool.tiers.find((t) => t.participant === "A")!.annotations.map((a) => `${a.start} ${a.value}`)).toEqual([
+      "0 gesture:iconic", "500 speech:the red one", "2000 gesture:beat", "2600 speech:yes", "5000 gesture:beat", "6000 speech:okay",
+    ]);
+    expect(pool.tiers.find((t) => t.participant === "B")!.annotations).toEqual([{ start: 2800, end: 4000, value: "speech:which one" }]);
+    expect(derive(files, scheme, { kind: "pool", layers: ["gesture", "speech"], prefix: false }).tiers.find((t) => t.participant === "A")!.annotations[0]!.value).toBe("iconic");
     const gaps = derive(files, scheme, { kind: "gaps", layer: "speech", label: "silence", minDuration: 200 });
     expect(gaps.tiers.find((t) => t.participant === "A")!.annotations.map((a) => [a.start, a.end])).toEqual([[0, 500], [2700, 6000]]);
     const chain = derive(files, scheme, { kind: "chain", layer: "speech", maxGap: 150, join: "text" });

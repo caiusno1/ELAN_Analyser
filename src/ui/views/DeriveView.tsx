@@ -15,7 +15,7 @@ import { useStore } from "../store.ts";
 
 type Kind = DeriveOp["kind"];
 
-const KIND_ORDER: Kind[] = ["overlap", "exclude", "union", "gaps", "filter", "recode", "chain", "window", "tokens", "floor", "alignment"];
+const KIND_ORDER: Kind[] = ["overlap", "with", "exclude", "union", "pool", "gaps", "filter", "recode", "chain", "window", "tokens", "floor", "alignment"];
 
 interface Settings {
   kind: Kind;
@@ -46,8 +46,10 @@ const clean = (s: string) => s.replace(/[^\p{L}\p{N}_-]+/gu, "_").replace(/^_+|_
 function suggestName(s: Settings): string {
   switch (s.kind) {
     case "overlap": return clean(`${s.layer}_and_${s.layerY}`);
+    case "with": return clean(`${s.layer}_with_${s.layerY}`);
     case "exclude": return clean(`${s.layer}_without_${s.layerY}`);
     case "union": return "merged";
+    case "pool": return "pooled";
     case "gaps": return clean(`${s.layer}_gaps`);
     case "filter": return clean(`${s.layer}_filtered`);
     case "recode": return clean(`${s.layer}_recoded`);
@@ -94,7 +96,7 @@ export function DeriveView() {
   const [previewFile, setPreviewFile] = useViewState("derive.file", "");
   const [span, setSpan] = useViewState<"minute" | "all">("derive.span", "minute");
 
-  const twoLayers = s.kind === "overlap" || s.kind === "exclude";
+  const twoLayers = s.kind === "overlap" || s.kind === "with" || s.kind === "exclude";
   const textOnly = s.kind === "tokens" || s.kind === "alignment" || s.kind === "floor";
   const layer = layers.some((l) => l.name === s.layer) ? s.layer : "";
   // Operations on transcriptions start from the speech layer unless a text layer is chosen already.
@@ -106,12 +108,14 @@ export function DeriveView() {
 
   const op = useMemo<DeriveOp | undefined>(() => {
     if (s.kind === "union") return s.layers.length >= 1 ? { kind: "union", layers: s.layers, label: s.text || "active" } : undefined;
+    if (s.kind === "pool") return s.layers.length >= 2 ? { kind: "pool", layers: s.layers, prefix: s.label !== "x" } : undefined;
     if (!mainLayer) return undefined;
     switch (s.kind) {
       case "filter": return { kind: "filter", layer: mainLayer, filter: s.filter, minDuration: s.minDuration * 1000, maxDuration: s.maxDuration * 1000 };
       case "recode": return { kind: "recode", layer: mainLayer, pattern: s.pattern, replacement: s.replacement };
       case "overlap": return layerY ? { kind: "overlap", layerX: mainLayer, layerY, pairing: s.pairing, label: s.label, filterX: s.filter, filterY: s.filterY } : undefined;
-      case "exclude": return layerY ? { kind: "exclude", layerX: mainLayer, layerY, pairing: s.pairing, filterY: s.filterY } : undefined;
+      case "with": return layerY ? { kind: "with", layerX: mainLayer, layerY, pairing: s.pairing, filterX: s.filter, filterY: s.filterY } : undefined;
+      case "exclude": return layerY ? { kind: "exclude", layerX: mainLayer, layerY, pairing: s.pairing, filterX: s.filter, filterY: s.filterY } : undefined;
       case "gaps": return { kind: "gaps", layer: mainLayer, label: s.text || "gap", minDuration: s.minDuration * 1000 };
       case "chain": return { kind: "chain", layer: mainLayer, maxGap: s.maxGap, join: s.join };
       case "tokens": return { kind: "tokens", layer: mainLayer, tokenizer };
@@ -158,7 +162,7 @@ export function DeriveView() {
   const shownFile = filesWithResult.find((f) => f.id === previewFile) ?? filesWithResult[0];
   const strip = useMemo(() => {
     if (!shownFile || !result || !op) return undefined;
-    const sourceLayers = op.kind === "union" ? op.layers : op.kind === "overlap" || op.kind === "exclude" ? [op.layerX, op.layerY] : op.kind === "floor" || op.kind === "alignment" ? [op.options.layer] : [op.layer];
+    const sourceLayers = op.kind === "union" || op.kind === "pool" ? op.layers : op.kind === "overlap" || op.kind === "with" || op.kind === "exclude" ? [op.layerX, op.layerY] : op.kind === "floor" || op.kind === "alignment" ? [op.options.layer] : [op.layer];
     const rows: { label: string; derived: boolean; annotations: { start: number; end: number; value: string }[] }[] = [];
     for (const l of sourceLayers) for (const lt of layerTiers([shownFile], scheme, l)) rows.push({ label: lt.tier.id, derived: false, annotations: lt.tier.annotations });
     for (const t of result.tiers.filter((d) => d.fileId === shownFile.id)) rows.push({ label: t.participant ? `${t.participant}_${finalName}` : finalName, derived: true, annotations: t.annotations });
@@ -244,8 +248,8 @@ export function DeriveView() {
                 <Select id="dv-kind" value={s.kind} onChange={(kind) => patch({ kind })} options={KIND_ORDER.map((k) => ({ value: k, label: DERIVE_LABEL[k].title }))} />
               </Field>
 
-              {s.kind === "union" ? (
-                <Field label="Layers to merge">
+              {s.kind === "union" || s.kind === "pool" ? (
+                <Field label={s.kind === "pool" ? "Layers to pool" : "Layers to merge"}>
                   <CheckList options={layers.map((l) => ({ value: l.name, label: l.name }))} selected={s.layers.filter((l) => existing.has(l))} onChange={(v) => patch({ layers: v })} />
                 </Field>
               ) : (
@@ -254,7 +258,7 @@ export function DeriveView() {
                 </Field>
               )}
 
-              {(s.kind === "filter" || s.kind === "overlap") && <FilterField id="dv-filter" label={twoLayers ? "Values of X" : "Values to keep"} value={s.filter} onChange={(filter) => patch({ filter })} values={values} />}
+              {(s.kind === "filter" || twoLayers) && <FilterField id="dv-filter" label={twoLayers ? "Values of X" : "Values to keep"} value={s.filter} onChange={(filter) => patch({ filter })} values={values} />}
 
               {twoLayers && (
                 <>
@@ -262,6 +266,11 @@ export function DeriveView() {
                   <FilterField id="dv-filter-y" label="Values of Y" value={s.filterY} onChange={(filterY) => patch({ filterY })} values={valuesY} />
                   <Field label="Which tiers go together" htmlFor="dv-pairing"><PairingSelect id="dv-pairing" value={s.pairing} onChange={(pairing) => patch({ pairing })} /></Field>
                 </>
+              )}
+              {s.kind === "pool" && (
+                <Field label="Values" hint="With the layer name in front, values of different layers stay apart, e.g. gaze:partner and head:nod.">
+                  <Segmented value={s.label === "x" ? "x" : "both"} onChange={(label) => patch({ label })} options={[{ value: "both", label: "layer:value" }, { value: "x", label: "value only" }]} />
+                </Field>
               )}
               {s.kind === "overlap" && (
                 <Field label="Value of the new annotations">
@@ -350,7 +359,7 @@ export function DeriveView() {
 
           <div className="stack">
             {!op ? (
-              <Empty title={s.kind === "union" ? "Tick the layers to merge" : "Choose the layers to work on"} />
+              <Empty title={s.kind === "union" ? "Tick the layers to merge" : s.kind === "pool" ? "Tick at least two layers to pool" : "Choose the layers to work on"} />
             ) : result?.error ? (
               <Callout kind="warning">{result.error}</Callout>
             ) : !stats || stats.annotations === 0 ? (

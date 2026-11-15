@@ -18,8 +18,10 @@ export type DeriveOp =
   | { kind: "filter"; layer: string; filter: ValueFilter; minDuration: number; maxDuration: number }
   | { kind: "recode"; layer: string; pattern: string; replacement: string }
   | { kind: "overlap"; layerX: string; layerY: string; pairing: Pairing; label: "x" | "y" | "both"; filterX?: ValueFilter; filterY?: ValueFilter }
-  | { kind: "exclude"; layerX: string; layerY: string; pairing: Pairing; filterY?: ValueFilter }
+  | { kind: "with"; layerX: string; layerY: string; pairing: Pairing; filterX?: ValueFilter; filterY?: ValueFilter }
+  | { kind: "exclude"; layerX: string; layerY: string; pairing: Pairing; filterX?: ValueFilter; filterY?: ValueFilter }
   | { kind: "union"; layers: string[]; label: string }
+  | { kind: "pool"; layers: string[]; prefix: boolean }
   | { kind: "gaps"; layer: string; label: string; minDuration: number }
   | { kind: "chain"; layer: string; maxGap: number; join: "text" | "count" | "first" }
   | { kind: "tokens"; layer: string; tokenizer: TokenizerOptions }
@@ -31,8 +33,10 @@ export const DERIVE_LABEL: Record<DeriveOp["kind"], { title: string; description
   filter: { title: "Filter", description: "Keep annotations by value or duration." },
   recode: { title: "Recode values", description: "Rewrite values with a search-and-replace pattern, e.g. to merge categories." },
   overlap: { title: "Overlap (AND)", description: "The stretches where annotations of two layers overlap." },
+  with: { title: "With (overlapping)", description: "Whole annotations of one layer that overlap another layer, e.g. utterances with a gesture." },
   exclude: { title: "Without (AND NOT)", description: "Annotations of one layer that do not overlap another layer." },
   union: { title: "Merge layers (OR)", description: "Combine several layers into one: any activity on any of them." },
+  pool: { title: "Pool layers (keep values)", description: "Put the annotations of several layers on one tier per participant, e.g. to analyse sequences across modalities." },
   gaps: { title: "Gaps (NOT)", description: "The stretches with no annotation, e.g. silent pauses." },
   chain: { title: "Join neighbours", description: "Merge annotations separated by short gaps, e.g. utterances into turns." },
   tokens: { title: "Split into words", description: "One annotation per word of a transcription tier (times interpolated)." },
@@ -90,8 +94,9 @@ export function derive(files: CorpusFile[], scheme: TierScheme, op: DeriveOp): {
       break;
     }
     case "overlap":
+    case "with":
     case "exclude": {
-      const fx = compileFilter(op.kind === "overlap" ? op.filterX : undefined);
+      const fx = compileFilter(op.filterX);
       const fy = compileFilter(op.filterY);
       error = fx.error ?? fy.error;
       const xs = layerTiers(files, scheme, op.layerX);
@@ -121,8 +126,10 @@ export function derive(files: CorpusFile[], scheme: TierScheme, op: DeriveOp): {
               hit[a] = 1;
             });
           }
+          // "with" keeps the annotations that overlap something, "exclude" the others.
+          const keep = op.kind === "with" ? 1 : 0;
           xa.forEach((a, k) => {
-            if (!hit[k]) anns.push({ start: a.start, end: a.end, value: a.value });
+            if (hit[k] === keep) anns.push({ start: a.start, end: a.end, value: a.value });
           });
         }
         out.push({ fileId: X.file.id, participant: X.participant, annotations: clean(anns) });
@@ -142,6 +149,19 @@ export function derive(files: CorpusFile[], scheme: TierScheme, op: DeriveOp): {
       for (const g of groups.values()) {
         out.push({ fileId: g.fileId, participant: g.participant, annotations: unionIntervals(g.raw).map((iv) => ({ ...iv, value: op.label })) });
       }
+      break;
+    }
+    case "pool": {
+      const groups = new Map<string, DerivedTier>();
+      for (const layer of op.layers) {
+        for (const lt of layerTiers(files, scheme, layer)) {
+          const key = `${lt.file.id}\u0001${lt.participant}`;
+          let g = groups.get(key);
+          if (!g) groups.set(key, (g = { fileId: lt.file.id, participant: lt.participant, annotations: [] }));
+          for (const a of lt.tier.annotations) g.annotations.push({ start: a.start, end: a.end, value: op.prefix ? `${layer}:${a.value}` : a.value });
+        }
+      }
+      for (const g of groups.values()) out.push({ ...g, annotations: clean(g.annotations) });
       break;
     }
     case "gaps": {
